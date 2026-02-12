@@ -323,9 +323,10 @@ class QuadrotorVecEnv(VecEnv):
         # Reinfocement learning actions
         roll_cmd = action[:, 0]
         pitch_cmd = action[:, 1]
-        residual = action[:, 2]
+        thrust_cmd = action[:, 2]
         hover = mass * g
-        thrust_cmd = torch.clamp(hover + residual, 0.0, 3.0 * hover)
+        # Map normalized thrust in [0, 1] to physical thrust [0, 3*hover]
+        thrust_cmd = torch.clamp(thrust_cmd, 0.0, 1.0) * (3.0 * hover)
 
         # Desired values (i.e., reference signals)
         Rd = TensorSE3.euler_to_rotmat(roll_cmd, pitch_cmd, self.curr_yaw_d)

@@ -63,8 +63,9 @@ class QuadrotorEnv(gym.Env):
         mass = self.uav_dynamics.get_mass()
         g = self.uav_dynamics.get_gravitational_acceleration()
         hover = mass * g
-        THRUST_MIN = -hover
-        THRUST_MAX = +hover
+        # Normalized thrust command in [0, 1] for RL
+        THRUST_MIN = 0.0
+        THRUST_MAX = 1.0
         self.action_space = spaces.Box(
             low=np.array([ROLL_CTRL_MIN, PITCH_CTRL_MIN,
                          THRUST_MIN], dtype=np.float32),
@@ -209,8 +210,8 @@ class QuadrotorEnv(gym.Env):
         g = self.uav_dynamics.get_gravitational_acceleration()
         R = self.uav_dynamics.get_rotmat()
         hover = mass * g
-        residual = action[2]
-        thrust_cmd = np.clip(hover + residual, 0.0, 3.0 * hover)
+        # Map normalized thrust in [0, 1] to physical thrust [0, 3*hover]
+        thrust_cmd = np.clip(thrust_cmd, 0.0, 1.0) * (3.0 * hover)
         uav_ctrl_M = self.moment_controller.run(
             self.uav_dynamics, roll_cmd, pitch_cmd, self.curr_yaw_d)
         uav_ctrl_f = thrust_cmd * R @ np.array([0.0, 0.0, 1.0])
