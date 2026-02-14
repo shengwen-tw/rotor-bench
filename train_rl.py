@@ -95,11 +95,26 @@ class QuadrotorVecEnv(VecEnv):
         # First environment is no longer needed
         _env.close()
 
-        # Geometric moment controller
-        self.kR = torch.tensor([10.0, 10.0, 10.0],
+        # Attitude error definition (for reward shaping only)
+        self.kx = torch.tensor([10.0, 10.0, 12.0],
                                device=self.device, dtype=self.dtype).view(1, 3)
-        self.kW = torch.tensor([2.0, 2.0, 2.0], device=self.device,
-                               dtype=self.dtype).view(1, 3)
+        self.kv = torch.tensor([7.0, 7.0, 12.0],
+                               device=self.device, dtype=self.dtype).view(1, 3)
+
+        # Reward scales and weights
+        self.pos_scale = 1.0
+        self.vel_scale = 1.0
+        self.att_scale = 0.5
+        self.ang_scale = 2.0
+        self.w_p = 1.0
+        self.w_v = 0.3
+        self.w_R = 0.3
+        self.w_W = 0.1
+        self.w_u = 0.01
+
+        # Moment limits (N*m)
+        self.M_max = torch.tensor([0.5, 0.5, 0.5],
+                                  device=self.device, dtype=self.dtype).view(1, 3)
 
         # Reset async actions
         self.actions = None
@@ -282,8 +297,13 @@ class QuadrotorVecEnv(VecEnv):
         ev = v - self.curr_vd
         ex_b = (Rt @ ex.unsqueeze(-1)).squeeze(-1)
         ev_b = (Rt @ ev.unsqueeze(-1)).squeeze(-1)
+        # Use body-frame x/y, but world-frame z for better altitude learning.
+        ex_b[:, 2] = ex[:, 2]
+        ev_b[:, 2] = ev[:, 2]
         euler = TensorSE3.rotmat_to_euler(R)
-        return torch.cat([ex_b, ev_b, euler], dim=1).to(self.dtype)
+        W = self.dynamics.get_angular_velocity()
+        eR = self._compute_attitude_error(ex, ev, R)
+        return torch.cat([ex_b, ev_b, euler, W, eR], dim=1).to(self.dtype)
 
     @torch.no_grad()
     def compute_reward(self):
@@ -296,9 +316,27 @@ class QuadrotorVecEnv(VecEnv):
         ev = v - self.curr_vd
         ex_b = (Rt @ ex.unsqueeze(-1)).squeeze(-1)
         ev_b = (Rt @ ev.unsqueeze(-1)).squeeze(-1)
-        norm_ex = torch.linalg.norm(ex_b, dim=1)
-        norm_ev = torch.linalg.norm(ev_b, dim=1)
-        reward = -(norm_ex + 0.25*norm_ev)
+        eR = self._compute_attitude_error(ex, ev, R)
+        W = self.dynamics.get_angular_velocity()
+
+        norm_ex = torch.linalg.norm(ex_b, dim=1) / self.pos_scale
+        norm_ev = torch.linalg.norm(ev_b, dim=1) / self.vel_scale
+        norm_eR = torch.linalg.norm(eR, dim=1) / self.att_scale
+        norm_W = torch.linalg.norm(W, dim=1) / self.ang_scale
+
+        u_term = 0.0
+        if self.actions is not None:
+            u = torch.as_tensor(
+                self.actions, device=self.device, dtype=self.dtype)
+            u_term = torch.linalg.norm(u[:, 0:3], dim=1)
+
+        reward = -(
+            self.w_p * norm_ex +
+            self.w_v * norm_ev +
+            self.w_R * norm_eR +
+            self.w_W * norm_W +
+            self.w_u * u_term
+        )
 
         # Check termination
         terminated = (norm_ex > 10.0) | (norm_ev > 30.0)
@@ -315,36 +353,50 @@ class QuadrotorVecEnv(VecEnv):
         mass = self.dynamics.get_mass()
         g = self.dynamics.get_gravitational_acceleration()
         R = self.dynamics.get_rotmat()
-        Rt = R.transpose(1, 2)
         b3 = R[:, :, 2]
-        W = self.dynamics.get_angular_velocity()
-        J = self.dynamics.get_inertia_matrix()
 
         # Reinfocement learning actions
-        roll_cmd = action[:, 0]
-        pitch_cmd = action[:, 1]
-        thrust_cmd = action[:, 2]
+        mx_cmd = action[:, 0]
+        my_cmd = action[:, 1]
+        mz_cmd = action[:, 2]
+        thrust_cmd = action[:, 3]
         hover = mass * g
         # Map normalized thrust in [0, 1] to physical thrust [0, 3*hover]
         thrust_cmd = torch.clamp(thrust_cmd, 0.0, 1.0) * (3.0 * hover)
 
-        # Desired values (i.e., reference signals)
-        Rd = TensorSE3.euler_to_rotmat(roll_cmd, pitch_cmd, self.curr_yaw_d)
-        Rdt = Rd.transpose(1, 2)
-
-        # Attitude errors
-        eR = 0.5 * TensorSE3.vee_map_3x3(Rdt @ R - Rt @ Rd)
-        eW = W
-
-        # Control moment
-        JW = (J @ W[:, :, None])[:, :, 0]
-        WJW = torch.cross(W, JW, dim=1)
-        uav_ctrl_M = -self.kR * eR - self.kW * eW + WJW
+        # Map normalized moments in [-1, 1] to physical moments
+        uav_ctrl_M = torch.clamp(
+            torch.stack([mx_cmd, my_cmd, mz_cmd], dim=1), -1.0, 1.0
+        ) * self.M_max
 
         # Control force
         uav_ctrl_f = thrust_cmd.unsqueeze(1) * b3
 
         return uav_ctrl_M, uav_ctrl_f
+
+    @torch.no_grad()
+    def _compute_attitude_error(self, ex: torch.Tensor, ev: torch.Tensor,
+                                R: torch.Tensor) -> torch.Tensor:
+        # Desired thrust vector in world frame (for reward shaping)
+        mass = self.dynamics.get_mass()
+        g = self.dynamics.get_gravitational_acceleration()
+        e3 = torch.tensor([0.0, 0.0, 1.0], device=self.device,
+                          dtype=self.dtype).view(1, 3)
+        f_n = -(-self.kx * ex - self.kv * ev - mass * g * e3 + mass * 0.0)
+        norm_f = torch.linalg.norm(f_n, dim=1, keepdim=True)
+        b3d = torch.where(norm_f > 1e-6, f_n / norm_f, e3)
+        b1d = torch.stack([
+            torch.cos(self.curr_yaw_d),
+            torch.sin(self.curr_yaw_d),
+            torch.zeros_like(self.curr_yaw_d),
+        ], dim=1)
+        b2d = torch.cross(b3d, b1d, dim=1)
+        b1d_proj = torch.cross(b2d, b3d, dim=1)
+        Rd = torch.stack([b1d_proj, b2d, b3d], dim=2)
+        Rt = R.transpose(1, 2)
+        Rdt = Rd.transpose(1, 2)
+        eR = 0.5 * TensorSE3.vee_map_3x3(Rdt @ R - Rt @ Rd)
+        return eR
 
 
 def parse_args():

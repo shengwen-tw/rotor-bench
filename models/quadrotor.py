@@ -6,7 +6,6 @@ import yaml
 
 from models.dynamics import Dynamics
 from models.se3_math import NumpySE3
-from control.geometric_control import GeometricMomentController
 from viz.rigidbody_visualize import QuadRenderer
 from gymnasium import spaces
 from trajectory_planner import TrajectoryPlanner
@@ -44,38 +43,52 @@ class QuadrotorEnv(gym.Env):
         traj_planner.plan()
 
         # Initialize observation space for reinforcement learning
-        # position error (3x1) + velocity error (3x1) + euler angles (3x1)
+        # position error (3) + velocity error (3) + euler (3) + angular vel (3) + attitude error (3)
         pos_vel_low = np.full(6, -np.inf, dtype=np.float32)
         pos_vel_high = np.full(6, +np.inf, dtype=np.float32)
-        euler_low = np.array([-np.pi, -np.pi/2, -np.pi], dtype=np.float32)
-        euler_high = np.array([+np.pi, +np.pi/2, +np.pi], dtype=np.float32)
+        euler_low = np.array([-np.pi, -np.pi / 2, -np.pi], dtype=np.float32)
+        euler_high = np.array([+np.pi, +np.pi / 2, +np.pi], dtype=np.float32)
+        ang_low = np.full(3, -np.inf, dtype=np.float32)
+        ang_high = np.full(3, +np.inf, dtype=np.float32)
+        att_err_low = np.full(3, -np.inf, dtype=np.float32)
+        att_err_high = np.full(3, +np.inf, dtype=np.float32)
         self.observation_space = spaces.Box(
-            low=np.concatenate([pos_vel_low, euler_low]),
-            high=np.concatenate([pos_vel_high, euler_high]),
-            dtype=np.float32
+            low=np.concatenate([pos_vel_low, euler_low, ang_low, att_err_low]),
+            high=np.concatenate([pos_vel_high, euler_high, ang_high, att_err_high]),
+            dtype=np.float32,
         )
 
-        # Initialize action space for reinforcement learning
-        ROLL_CTRL_MIN = -np.deg2rad(50)
-        ROLL_CTRL_MAX = +np.deg2rad(50)
-        PITCH_CTRL_MIN = -np.deg2rad(50)
-        PITCH_CTRL_MAX = +np.deg2rad(50)
-        mass = self.uav_dynamics.get_mass()
-        g = self.uav_dynamics.get_gravitational_acceleration()
-        hover = mass * g
-        # Normalized thrust command in [0, 1] for RL
+        # Initialize action space for reinforcement learning (end-to-end)
+        # Normalized moments in [-1, 1], thrust in [0, 1]
+        MOMENT_MIN = -1.0
+        MOMENT_MAX = +1.0
         THRUST_MIN = 0.0
         THRUST_MAX = 1.0
         self.action_space = spaces.Box(
-            low=np.array([ROLL_CTRL_MIN, PITCH_CTRL_MIN,
-                         THRUST_MIN], dtype=np.float32),
-            high=np.array([ROLL_CTRL_MAX, PITCH_CTRL_MAX,
-                          THRUST_MAX], dtype=np.float32),
-            dtype=np.float32
+            low=np.array([MOMENT_MIN, MOMENT_MIN, MOMENT_MIN, THRUST_MIN],
+                         dtype=np.float32),
+            high=np.array([MOMENT_MAX, MOMENT_MAX, MOMENT_MAX, THRUST_MAX],
+                          dtype=np.float32),
+            dtype=np.float32,
         )
 
-        # Initialize moment controller for reinforcement learning
-        self.moment_controller = GeometricMomentController()
+        # Reward scales and weights
+        self.pos_scale = 1.0
+        self.vel_scale = 1.0
+        self.att_scale = 0.5
+        self.ang_scale = 2.0
+        self.w_p = 1.0
+        self.w_v = 0.3
+        self.w_R = 0.3
+        self.w_W = 0.1
+        self.w_u = 0.01
+
+        # Control gains for defining desired attitude (reward shaping only)
+        self.kx = np.array([10.0, 10.0, 12.0])
+        self.kv = np.array([7.0, 7.0, 12.0])
+
+        # Moment limits (N*m)
+        self.M_max = np.array([0.5, 0.5, 0.5], dtype=np.float32)
 
         # Get random seed
         self.np_random, _ = gym.utils.seeding.np_random(None)
@@ -146,6 +159,7 @@ class QuadrotorEnv(gym.Env):
         self.curr_yaw_d = self.yaw_d[0]
         self.curr_Wd = self.Wd
         self.curr_W_dot_d = self.W_dot_d
+        self.last_action = None
 
         # Return data for reinforcement learning
         obs = self.get_observation()
@@ -154,12 +168,30 @@ class QuadrotorEnv(gym.Env):
     def compute_reward(self):
         """Compute reward for reinforcement learning"""
         obs = self.get_observation()
-        ex, ev = obs[0:3], obs[3:6]
-        R = self.uav_dynamics.get_rotmat()
-        Rt = R.T
-        ex_b = Rt @ ex
-        ev_b = Rt @ ev
-        return -float(np.linalg.norm(ex_b) + 0.25*np.linalg.norm(ev_b))
+        ex_b = obs[0:3]
+        ev_b = obs[3:6]
+        eR = obs[12:15]
+        W = obs[9:12]
+        # Normalize errors
+        pos_term = np.linalg.norm(ex_b) / self.pos_scale
+        vel_term = np.linalg.norm(ev_b) / self.vel_scale
+        att_term = np.linalg.norm(eR) / self.att_scale
+        ang_term = np.linalg.norm(W) / self.ang_scale
+
+        # Control penalty (uses last action stored in env)
+        u_term = 0.0
+        if hasattr(self, "last_action") and self.last_action is not None:
+            u = self.last_action
+            u_term = np.linalg.norm(u[0:3])  # moment only
+
+        reward = -float(
+            self.w_p * pos_term +
+            self.w_v * vel_term +
+            self.w_R * att_term +
+            self.w_W * ang_term +
+            self.w_u * u_term
+        )
+        return reward
 
     def get_observation(self):
         """Return observation for reinforcement learning"""
@@ -171,8 +203,13 @@ class QuadrotorEnv(gym.Env):
         ev = v - self.curr_vd
         ex_b = Rt @ ex
         ev_b = Rt @ ev
+        # Use body-frame x/y, but world-frame z for better altitude learning.
+        ex_b[2] = ex[2]
+        ev_b[2] = ev[2]
         euler = NumpySE3.rotmat_to_euler(R)
-        return np.concatenate([ex_b, ev_b, euler]).astype(np.float32)
+        W = self.uav_dynamics.get_angular_velocity()
+        eR = self._compute_attitude_error(ex, ev, R)
+        return np.concatenate([ex_b, ev_b, euler, W, eR]).astype(np.float32)
 
     def check_terminated(self):
         """Check terminaion for reinforcement learning"""
@@ -205,15 +242,16 @@ class QuadrotorEnv(gym.Env):
                 self.curr_W_dot_d]
 
     def execute_rl_action(self, action):
-        [roll_cmd, pitch_cmd, thrust_cmd] = action
+        [mx_cmd, my_cmd, mz_cmd, thrust_cmd] = action
         mass = self.uav_dynamics.get_mass()
         g = self.uav_dynamics.get_gravitational_acceleration()
         R = self.uav_dynamics.get_rotmat()
         hover = mass * g
         # Map normalized thrust in [0, 1] to physical thrust [0, 3*hover]
         thrust_cmd = np.clip(thrust_cmd, 0.0, 1.0) * (3.0 * hover)
-        uav_ctrl_M = self.moment_controller.run(
-            self.uav_dynamics, roll_cmd, pitch_cmd, self.curr_yaw_d)
+        # Map normalized moments in [-1, 1] to physical moments
+        uav_ctrl_M = np.clip(np.array([mx_cmd, my_cmd, mz_cmd], dtype=np.float32),
+                             -1.0, 1.0) * self.M_max
         uav_ctrl_f = thrust_cmd * R @ np.array([0.0, 0.0, 1.0])
         return [uav_ctrl_M, uav_ctrl_f]
 
@@ -224,8 +262,9 @@ class QuadrotorEnv(gym.Env):
 
         if self.args.ctrl == 'RL':
             # For reinforcement learning, the action input is desired roll,
-            # pitch, and thrust commands
+            # moments and thrust commands
             [uav_ctrl_M, uav_ctrl_f] = self.execute_rl_action(action)
+            self.last_action = action
         else:
             # For traditional controllers, the action input is 3x1 moment and
             # force vectors
@@ -392,3 +431,23 @@ class QuadrotorEnv(gym.Env):
             R = self.uav_dynamics.get_rotmat()
             x = self.uav_dynamics.get_position()
             self.viz.render(R, x)
+
+    def _compute_attitude_error(self, ex, ev, R):
+        # Desired thrust vector in world frame (for reward shaping)
+        mass = self.uav_dynamics.get_mass()
+        g = self.uav_dynamics.get_gravitational_acceleration()
+        e3 = np.array([0.0, 0.0, 1.0])
+        f_n = -(-self.kx * ex - self.kv * ev - mass * g * e3 + mass * self.curr_ad)
+        norm_f = np.linalg.norm(f_n)
+        if norm_f < 1e-6:
+            b3d = e3
+        else:
+            b3d = f_n / norm_f
+        b1d = np.array([np.cos(self.curr_yaw_d), np.sin(self.curr_yaw_d), 0.0])
+        b2d = np.cross(b3d, b1d)
+        b1d_proj = np.cross(b2d, b3d)
+        Rd = np.column_stack((b1d_proj, b2d, b3d))
+        Rt = R.T
+        Rdt = Rd.T
+        eR = 0.5 * NumpySE3.vee_map_3x3(Rdt @ R - Rt @ Rd)
+        return eR
