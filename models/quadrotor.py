@@ -5,6 +5,7 @@ import numpy as np
 import yaml
 
 from models.dynamics import Dynamics
+from models.esc import ESC
 from models.se3_math import NumpySE3
 from viz.rigidbody_visualize import QuadRenderer
 from gymnasium import spaces
@@ -37,6 +38,12 @@ class QuadrotorEnv(gym.Env):
             self.uav_dynamics = Dynamics(dt=args.dt, mass=mass, J=J)
         else:
             self.uav_dynamics = uav_dynamics
+
+        # ESC model (approximate RPM from thrust)
+        # RotorS-style parameters (Iris defaults)
+        self.esc = ESC(Ct=8.54858e-06)
+        self.esc_tau_up = 0.0125   # [s]
+        self.esc_tau_down = 0.025  # [s]
 
         # Initialize trajectory planner
         traj_planner = TrajectoryPlanner(args)
@@ -151,6 +158,8 @@ class QuadrotorEnv(gym.Env):
         self.euler_arr = np.zeros((3, self.iterations))
         self.W_dot_arr = np.zeros((3, self.iterations))
         self.W_arr = np.zeros((3, self.iterations))
+        self.rpm_arr = np.zeros(self.iterations)
+        self.rpm_cmd_arr = np.zeros(self.iterations)
 
         # Current desired values (i.e., reference signals)
         self.curr_xd = self.xd[:, 0]
@@ -252,7 +261,12 @@ class QuadrotorEnv(gym.Env):
         # Map normalized moments in [-1, 1] to physical moments
         uav_ctrl_M = np.clip(np.array([mx_cmd, my_cmd, mz_cmd], dtype=np.float32),
                              -1.0, 1.0) * self.M_max
-        uav_ctrl_f = thrust_cmd * R @ np.array([0.0, 0.0, 1.0])
+        # ESC: convert thrust command -> rotor speed (1st-order lag) -> thrust
+        self.esc.update_from_thrust_command(
+            thrust_cmd, dt=self.dt,
+            tau_up=self.esc_tau_up, tau_down=self.esc_tau_down)
+        thrust_out = self.esc.get_esc_output_force()
+        uav_ctrl_f = thrust_out * R @ np.array([0.0, 0.0, 1.0])
         return [uav_ctrl_M, uav_ctrl_f]
 
     def step(self, action):
@@ -269,6 +283,17 @@ class QuadrotorEnv(gym.Env):
             # For traditional controllers, the action input is 3x1 moment and
             # force vectors
             [uav_ctrl_M, uav_ctrl_f] = action
+            # Apply ESC lag to non-RL thrust as well
+            thrust_cmd = float(np.linalg.norm(uav_ctrl_f))
+            if thrust_cmd > 0.0:
+                direction = uav_ctrl_f / thrust_cmd
+            else:
+                direction = np.array([0.0, 0.0, 1.0])
+            self.esc.update_from_thrust_command(
+                thrust_cmd, dt=self.dt,
+                tau_up=self.esc_tau_up, tau_down=self.esc_tau_down)
+            thrust_out = self.esc.get_esc_output_force()
+            uav_ctrl_f = thrust_out * direction
 
         # Update quadrotor dyanmics
         self.uav_dynamics.set_moment(uav_ctrl_M)
@@ -286,6 +311,8 @@ class QuadrotorEnv(gym.Env):
         self.W_dot_arr[:,
                        self.idx] = self.uav_dynamics.get_angular_acceleration()
         self.W_arr[:, self.idx] = self.uav_dynamics.get_angular_velocity()
+        self.rpm_arr[self.idx] = self.esc.rotor_rpm
+        self.rpm_cmd_arr[self.idx] = self.esc.cmd_rpm
 
         # Update time index
         self.idx += 1
@@ -396,6 +423,15 @@ class QuadrotorEnv(gym.Env):
         plt.xlabel("time [s]")
         plt.ylabel("-z [m/s^2]")
 
+        # Plot rotor RPM
+        plt.figure("Rotor RPM (approx)")
+        plt.plot(self.time_arr, self.rpm_arr)
+        plt.plot(self.time_arr, self.rpm_cmd_arr, linestyle="--", alpha=0.8)
+        plt.grid(True)
+        plt.title("Rotor RPM (approx)")
+        plt.xlabel("time [s]")
+        plt.ylabel("rpm")
+
         # 2D XY trajectory comparison
         plt.figure("XY Trajectory")
         plt.plot(self.xd[0, :], self.xd[1, :],
@@ -431,6 +467,7 @@ class QuadrotorEnv(gym.Env):
             R = self.uav_dynamics.get_rotmat()
             x = self.uav_dynamics.get_position()
             self.viz.render(R, x)
+
 
     def _compute_attitude_error(self, ex, ev, R):
         # Desired thrust vector in world frame (for reward shaping)

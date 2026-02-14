@@ -9,6 +9,7 @@ from argparse import Namespace
 from models.dynamics import DynamicsBatch
 from models.quadrotor import QuadrotorEnv
 from models.se3_math import TensorSE3
+from models.esc import ESCBatch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
@@ -115,6 +116,12 @@ class QuadrotorVecEnv(VecEnv):
         # Moment limits (N*m)
         self.M_max = torch.tensor([0.5, 0.5, 0.5],
                                   device=self.device, dtype=self.dtype).view(1, 3)
+
+        # ESC model (RotorS-style parameters)
+        self.esc_tau_up = 0.0125
+        self.esc_tau_down = 0.025
+        self.esc = ESCBatch(device=self.device, dtype=self.dtype,
+                            Ct=8.54858e-06, batch=self.num_envs)
 
         # Reset async actions
         self.actions = None
@@ -249,6 +256,10 @@ class QuadrotorVecEnv(VecEnv):
         self.dynamics.W_dot[idx] = 0.0
         self.dynamics.R[idx] = torch.eye(
             3, device=self.device, dtype=self.dtype)
+        self.esc.omega[idx] = 0.0
+        self.esc.rotor_rpm[idx] = 0.0
+        self.esc.cmd_rpm[idx] = 0.0
+        self.esc.initialized[idx] = False
 
         # Randomize states
         if self.training:
@@ -369,8 +380,14 @@ class QuadrotorVecEnv(VecEnv):
             torch.stack([mx_cmd, my_cmd, mz_cmd], dim=1), -1.0, 1.0
         ) * self.M_max
 
+        # ESC lag: thrust command -> rotor speed -> thrust
+        self.esc.update_from_thrust_command(
+            thrust_cmd, dt=self.dynamics.get_time_step(),
+            tau_up=self.esc_tau_up, tau_down=self.esc_tau_down)
+        thrust_out = self.esc.get_esc_output_force()
+
         # Control force
-        uav_ctrl_f = thrust_cmd.unsqueeze(1) * b3
+        uav_ctrl_f = thrust_out.unsqueeze(1) * b3
 
         return uav_ctrl_M, uav_ctrl_f
 
