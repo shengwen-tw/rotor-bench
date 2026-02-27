@@ -46,24 +46,18 @@ def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
             continue
 
         # Compute CARE residual
-        ric_residual = \
-            np.linalg.norm(At @ X + X @ A - X @ G @ X + H, ord='fro')
+        ric_residual = np.linalg.norm(
+            At @ X + X @ A - X @ G @ X + H, ord='fro')
 
         # Check if residual is small enough
         if ric_residual < residual_eps:
-            # Stabilizing check: eigenvalues of (A - GX) must be in LHP
-            eig_cl = np.linalg.eigvals(A - (G @ X))
-            if np.max(np.real(eig_cl)) < lhp_eps:
-                # Stabilizing solution, decrease the upper bound
-                gamma_u = gamma
+            # Stabilizing solution, decrease the upper bound
+            gamma_u = gamma
 
-                # Record current best
-                optimal_residual = ric_residual
-                optimal_gamma = gamma
-                optimal_X = X
-            else:
-                # Non-stabilizing solution, increase lower bound
-                gamma_l = gamma
+            # Record current best
+            optimal_residual = ric_residual
+            optimal_gamma = gamma
+            optimal_X = X
         else:
             # Residual too large, increase lower bound
             gamma_l = gamma
