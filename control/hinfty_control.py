@@ -16,7 +16,7 @@ class HinfController:
         # Use 0 to let `hinf_syn` estimate the theoretical lower bound, then set a
         # practical value (typically slightly larger) for a numerically robust
         # suboptimal solution.
-        self.gamma_lb = 30
+        self.gamma_lb = 0
 
         # Disturbance matrix
         self.B1 = None
