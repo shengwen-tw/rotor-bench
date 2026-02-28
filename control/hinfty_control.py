@@ -59,6 +59,7 @@ class HinfController:
         self.ric_residual_arr = np.zeros(self.iterations)
         self.gamma_arr = np.zeros(self.iterations)
         self.gamma_lb_arr = np.zeros(self.iterations)
+        self.X_cond_arr = np.zeros(self.iterations)
 
     def build_disturbance_matrix(self, mass, J):
         B1 = np.zeros((12, 6))
@@ -283,6 +284,7 @@ class HinfController:
         self.ric_residual_arr[self.idx] = ric_residual
         self.gamma_arr[self.idx] = gamma
         self.gamma_lb_arr[self.idx] = gamma_lb
+        self.X_cond_arr[self.idx] = np.linalg.cond(X)
 
         # Update time index
         self.idx += 1
@@ -395,3 +397,11 @@ class HinfController:
         plt.grid(True)
         plt.xlabel("time [s]")
         plt.ylabel("gamma_lb")
+
+        # Plot condition number of CARE solution X
+        plt.figure("condition number of CARE solution X")
+        plt.plot(t, self.X_cond_arr)
+        plt.grid(True)
+        plt.title("cond(X)")
+        plt.xlabel("time [s]")
+        plt.ylabel("cond(X)")

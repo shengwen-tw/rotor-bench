@@ -5,7 +5,7 @@ from control.care_sda import care_sda
 
 def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
              gamma_lb: float = 0, gamma_eps: float = 1e-5,
-             residual_eps: float = 1e-7):
+             residual_eps: float = 1e-7, cond_thresh: float = 1.75e5):
     At = A.T
     B1B1t = B1 @ B1.T
     B2B2t = B2 @ B2.T
@@ -24,6 +24,15 @@ def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
     # computationally efficient and numerically reliable suboptimal solution.
     # If gamma_lb is set to 0, the function returns an estimate of the true lower
     # bound γ.
+    #
+    # Similar descriptions can be found in MATLAB’s hinfsys documentation:
+    # [K,CL,gamma] = hinfsyn(P,nmeas,ncont,gamTry)
+    # A less-than-optimal controller can have smaller gains and be more
+    # numerically well-conditioned.
+    # ---
+    # [K,CL,gamma] = hinfsyn(P,nmeas,ncont,gamRange)
+    # Limiting the search range can speed up computation by reducing the number
+    # of iterations performed by hinfsyn to test different performance levels.
     gamma_l = gamma_lb
 
     iteration = 0
@@ -42,6 +51,11 @@ def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
         X = care_sda(A, H, G, raise_on_fail=False)
         if X is None:
             # Infeasible, increase lower bound
+            gamma_l = gamma
+            continue
+
+        # Discard ill-conditioned solutions
+        if np.linalg.cond(X) > cond_thresh:
             gamma_l = gamma
             continue
 
