@@ -5,15 +5,15 @@ from control.care_sda import care_sda
 
 def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
              gamma_lb: float = 0, gamma_eps: float = 1e-5,
-             residual_eps: float = 1e-5, lhp_eps: float = -1e-8):
+             residual_eps: float = 1e-7):
     At = A.T
     B1B1t = B1 @ B1.T
     B2B2t = B2 @ B2.T
     C1tC1 = C1.T @ C1
 
     # Approximate an upper bound gamma
-    rho_max = np.max(np.linalg.eigvals(B1.T @ B1))
-    rho_0 = np.min(np.linalg.eigvals(B2.T @ B2))
+    rho_max = np.max(np.linalg.eigvalsh(B1.T @ B1))
+    rho_0 = np.min(np.linalg.eigvalsh(B2.T @ B2))
     gamma_u = rho_max / rho_0
 
     # The lower bound γ of the H-infinity synthesis corresponds to the smallest
@@ -51,7 +51,7 @@ def hinf_syn(A: np.ndarray, B1: np.ndarray, B2: np.ndarray, C1: np.ndarray,
 
         # Check if residual is small enough
         if ric_residual < residual_eps:
-            # Stabilizing solution, decrease the upper bound
+            # Obtained a stabilizing solution, decrease the upper bound
             gamma_u = gamma
 
             # Record current best
