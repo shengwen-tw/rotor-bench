@@ -14,43 +14,48 @@ def care_sda(A: np.ndarray, H: np.ndarray, G: np.ndarray,
         "A structure-preserving doubling algorithm for continuous-time
         algebraic Riccati equations"
     """
-    def inv(M):
-        return np.linalg.inv(M)
-
-    def norm(M):
-        return np.linalg.norm(M)
+    
+    def _right_solve(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+        """Compute A @ inv(B) without forming inv(B)"""
+        return np.linalg.solve(B.T, A.T).T
 
     I = np.eye(A.shape[0])
-    At = A.T
+
+    # Precomputation
     Ar = A - r * I
+    Ar_t = Ar.T
+    Ar_inv_G = np.linalg.solve(Ar, G)
+    A_HAG = Ar_t + H @ Ar_inv_G
 
     # Initialization
-    A_old = I + 2 * r * inv(Ar + G @ inv(Ar.T) @ H)
-    G_old = 2 * r * inv(Ar) @ G @ inv(Ar.T + H @ inv(Ar) @ G)
-    H_old = 2 * r * inv(Ar.T + H @ inv(Ar) @ G) @ H @ inv(Ar)
+    A_old = I + 2.0 * r * np.linalg.solve(Ar + G @ np.linalg.solve(Ar_t, H), I)
+    G_old = 2.0 * r * _right_solve(Ar_inv_G, A_HAG)
+    H_old = 2.0 * r * np.linalg.solve(A_HAG, _right_solve(H, Ar))
 
     for _ in range(max_iter):
         # Precomputation
-        I_HG_inv = inv(I + H_old @ G_old)
         A_old_t = A_old.T
+        I_HG = I + H_old @ G_old
+        I_GH = I + G_old @ H_old
 
-        # Updates
-        A_new = A_old @ inv(I + G_old @ H_old) @ A_old
-        G_new = G_old + A_old @ G_old @ I_HG_inv @ A_old_t
-        H_new = H_old + A_old_t @ I_HG_inv @ H_old @ A_old
+        # Update
+        A_new = A_old @ np.linalg.solve(I_GH, A_old)
+        G_new = G_old + A_old @ G_old @ np.linalg.solve(I_HG, A_old_t)
+        H_new = H_old + A_old_t @ np.linalg.solve(I_HG, H_old @ A_old)
 
         # Computate matrix norm for convergence check
-        norm_H_old = norm(H_old)
-        norm_H_now = norm(H_new)
+        diff = np.linalg.norm(H_new - H_old, ord="fro")
+        norm_H = np.linalg.norm(H_new, ord="fro")
 
-        # Prepare next iteration
+        # Save for next iteration
         A_old = A_new
         G_old = G_new
         H_old = H_new
 
         # Convergence check
-        if abs(norm_H_now - norm_H_old) < tol:
-            return H_new  # X = H_new
+        if diff <= (tol * norm_H):
+            # Return symmetrized X = H_new
+            return (H_new + H_new.T) / 2
 
     if raise_on_fail:
         raise RuntimeError("SDA did not converge within max_iter.")
