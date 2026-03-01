@@ -26,16 +26,16 @@ class HinfController:
 
         # Output weighting matrix (C1)
         self.C1 = np.zeros((14, 12))
-        self.C1[0, 2] = 125   # Waw
-        self.C1[1, 3] = 10    # Roll rate
-        self.C1[2, 4] = 10    # Pitch rate
-        self.C1[3, 5] = 25    # Yaw rate
-        self.C1[4, 6] = 50    # vx (body-fixed frame)
-        self.C1[5, 7] = 50    # vy (body-fixed frame)
-        self.C1[6, 8] = 100   # vz (body-fixed frame)
-        self.C1[7, 9] = 200   # x (inertial frame)
-        self.C1[8, 10] = 200  # y (inertial frame)
-        self.C1[9, 11] = 160  # z (inertial frame)
+        self.C1[0, 2] = 70.0   # Yaw
+        self.C1[1, 3] = 3.0    # Roll rate
+        self.C1[2, 4] = 3.0    # Pitch rate
+        self.C1[3, 5] = 10.0   # Yaw rate
+        self.C1[4, 6] = 45.0   # vx (body-fixed frame)
+        self.C1[5, 7] = 45.0   # vy (body-fixed frame)
+        self.C1[6, 8] = 55.0   # vz (body-fixed frame)
+        self.C1[7, 9] = 100.0  # x (inertial frame)
+        self.C1[8, 10] = 100.0 # y (inertial frame)
+        self.C1[9, 11] = 100.0 # z (inertial frame)
 
         # Z-vector of the inertial frame
         self.e3 = np.array([0.0, 0.0, 1.0])
