@@ -8,7 +8,8 @@ A compact quadrotor flight simulator written in Python, designed for benchmarkin
    Models quadrotor dynamics down to the force and torque level. Ideal for fast prototyping and algorithm testing.
 
 2. **SE(3) rigid-body dynamics**  
-   Accurate rigid-body updates using RK4 and the Cayley transform on SO(3).
+   Accurate rigid-body updates using RK4 and the Cayley transform on SO(3).  
+   GPU-accelerated batched rollouts are supported for RL training.
 
 3. **Multiple controllers included**  
    Geometric tracking, LQR, H∞, and RL controllers are available out of the box.
