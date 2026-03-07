@@ -131,10 +131,6 @@ class DynamicsBatch:
         Wdot = (self.J_inv @ (self.M - W_cross_JW)[:, :, None])[:, :, 0]
         return Wdot
 
-    def integrator_euler(self, f_now: Tensor, f_dot: Tensor) -> Tensor:
-        """Euler integration"""
-        return f_now + f_dot * self.dt
-
     def integrator_rk4(self, f_now: Tensor, f_dot_func) -> Tensor:
         """Runge–Kutta fourth-order method"""
         k1 = f_dot_func(f_now)
@@ -152,11 +148,10 @@ class DynamicsBatch:
 
         Integration strategy:
         - Linear velocity (v): integrated using Euler method; since
-          acceleration is constant within a time step, RK4 would effectively
-          reduce to Euler.
-        - Position (x): integrated using Euler method; since velocity (v) is
-          already updated and treated as constant over the time step, RK4 would
-          again reduce to Euler.
+          acceleration is constant within a time step, higher-order methods
+          would reduce to Euler.
+        - Position (x): integrated using constant-acceleration kinematics
+          (x += v * dt + 0.5 * a * dt^2).
         - Angular velocity (W): integrated using RK4 due to nonlinear dynamics
           involving cross products.
         - Rotation matrix (R): updated directly on SO(3) with the Cayley transform,
@@ -169,11 +164,11 @@ class DynamicsBatch:
         # 2. Update angular acceleration from moment
         self.W_dot = self.dW_dt(self.W)
 
-        # 3. Update linear velocity
-        self.v = self.integrator_euler(self.v, self.a)
+        # 3. Update position with constant-acceleration kinematics
+        self.x = self.x + self.v * self.dt + 0.5 * self.a * (self.dt ** 2)
 
-        # 4. Update position
-        self.x = self.integrator_euler(self.x, self.v)
+        # 4. Update linear velocity (Euler)
+        self.v = self.v + self.a * self.dt
 
         # 5. Update angular velocity
         self.W = self.integrator_rk4(self.W, self.dW_dt)
