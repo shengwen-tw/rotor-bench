@@ -159,8 +159,8 @@ class DynamicsBatch:
           again reduce to Euler.
         - Angular velocity (W): integrated using RK4 due to nonlinear dynamics
           involving cross products.
-        - Rotation matrix (R): updated using the exponential map, which
-          preserves the orthogonality and structure of the SO(3) group.
+        - Rotation matrix (R): updated directly on SO(3) with the Cayley transform,
+          which preserves the orthogonality and structure of the SO(3) group.
         """
 
         # 1. Update linear acceleration from force
@@ -178,9 +178,13 @@ class DynamicsBatch:
         # 5. Update angular velocity
         self.W = self.integrator_rk4(self.W, self.dW_dt)
 
-        # 6. Update rotation matrix
-        # dR = torch.matrix_exp(TensorSE3.hat_map_3x3(self.W * self.dt))
-        dR = TensorSE3.hat_map_3x3(self.W * self.dt) + self.I
+        # 6. Update rotation matrix directly on SO(3) with the Cayley transform
+        # R = R @ inv(I - A) @ (I + A), where A = hat(Omega * dt / 2)
+        A = TensorSE3.hat_map_3x3(self.W * self.dt * 0.5)
+        I_minus_A = self.I - A
+        I_plus_A  = self.I + A
+        # Solve a linear system instead of a matrix inversion for better accuracy
+        dR = torch.linalg.solve(I_minus_A, I_plus_A)
         self.R = self.R @ dR
         self.R = TensorSE3.rotmat_orthonormalize(self.R)
 
