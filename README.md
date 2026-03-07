@@ -7,15 +7,14 @@ A compact quadrotor flight simulator written in Python, designed for benchmarkin
 1. **Lightweight quadrotor simulator**  
    Models quadrotor dynamics down to the force and torque level. Ideal for fast prototyping and algorithm testing.
 
-2. **Rigidbody dynamics with SE(3) model**  
-   Dynamics modeled on the SE(3) Lie group with Runge-Kutta 4th-order integration (RK4).  
-   Includes a default implementation of the nonlinear [Geometric Tracking Controller](https://ieeexplore.ieee.org/document/5717652).
+2. **SE(3) rigid-body dynamics**  
+   Accurate rigid-body updates using RK4 and the Cayley transform on SO(3).
 
-3. **Python-based and easily extendable**  
-   Designed for integration with tools like [CasADi](https://web.casadi.org/) or [PyTorch](https://pytorch.org/) for advanced control or learning-based development.
+3. **Multiple controllers included**  
+   Geometric tracking, LQR, H∞, and RL controllers are available out of the box.
 
-4. **Flight trajectory visualization**  
-   Animated 3D visualization of quadrotor motion alongside the desired trajectory.
+4. **Trajectory planning and visualization**  
+   Planned reference trajectories and animated 3D visualization of quadrotor motion.
 
 ## Installation
 
@@ -28,28 +27,22 @@ pip install -r requirements.txt
 ### Geometric Tracking Controller
 
 ```bash
-python ./main.py --ctrl=GEOMETRIC_CTRL
+python main.py --ctrl=GEOMETRIC_CTRL
 ```
 
 ### Linear Quadratic Regulator (LQR)
 
 ```bash
-python ./main.py --ctrl=LQR
+python main.py --ctrl=LQR
 ```
 
-### H∞ Controller (H-infinity)
+### H∞ Controller
 
 ```bash
-python ./main.py --ctrl=HINFTY_CTRL
+python main.py --ctrl=HINFTY_CTRL
 ```
 
 ### Reinforcement Learning (Experimental)
-
-Train an RL policy:
-```
-python train_rl.py --traj HOVERING --iterations 1000 --n-envs 64 --total-steps 1000000000000
-tensorboard --logdir runs/ppo_quadrotor
-```
 
 Download a pre-trained policy:
 ```
@@ -58,26 +51,33 @@ cd runs/ppo_quadrotor/best
 wget https://github.com/shengwen-tw/quadrotor-sim-py/raw/refs/heads/blob/runs/ppo_quadrotor/best/best_model.zip
 ```
 
-Run with the RL controller:
+Start simulation with the RL controller:
 ```
-python ./main.py --ctrl=RL
+python main.py --ctrl=RL
+```
+
+To train an RL policy:
+```
+python train_rl.py --traj HOVERING --iterations 1000 --n-envs 64 --total-steps 1000000000000
+tensorboard --logdir runs/ppo_quadrotor
 ```
 
 ## Project Structure
 
 ```
-quadrotor-sim-py/
+rotor-bench/
 ├── main.py                 # Entry point of the simulation
-├── requirements.txt        # Required Python packages
+├── train_rl.py             # RL training script
 ├── trajectory_planner.py   # Trajectory planner
-├── dynamics.py             # Quadrotor dynamics model
-├── quadrotor.py            # Quadrotor environment wrapper
-├── geometric_control.py    # Geometric tracking controller for quadrotor
-├── se3_math.py             # SE(3) math utilities
-├── rigidbody_visualize.py  # 3D visualization
-├── utils/                  # Placeholder
-│       └── __init__.py
-├── preview.png             # Preview image of the simulator
+├── models/                 # Dynamics and SE(3) math
+│   ├── dynamics.py
+│   ├── quadrotor.py
+│   └── se3_math.py
+├── control/                # Controllers (geometric, LQR, H∞, RL)
+├── configs/                # Vehicle and trajectory configs
+├── viz/                    # 3D visualization
+├── assets/                 # Images and media
+└── requirements.txt
 ```
 
 ## Preview
