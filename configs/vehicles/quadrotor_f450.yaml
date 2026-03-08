@@ -1,6 +1,8 @@
 model: "quadrotor"
-mass: 1
-inertia:
+mass: 1 # [kg]
+inertia: # [kg*m^2]
   - [0.01466, 0.0, 0.0]
   - [0.0, 0.01466, 0.0]
   - [0.0, 0.0, 0.02848]
+arm_length: 0.225  # [m]
+thrust_to_torque: 0.009012  # [m]

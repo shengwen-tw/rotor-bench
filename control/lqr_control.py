@@ -277,8 +277,8 @@ class LQRController:
         # Combine feedforward and feedback control
         u = u_ff + u_fb
 
-        # Control force (3x1 vector in world frame)
-        uav_ctrl_f = u[0] * R @ self.e3
+        # Control collective thrust (scalar, body z-direction)
+        f_collective = u[0]
 
         # Control moment (3x1 vector in body-fixed frame)
         uav_ctrl_M = u[1:4]
@@ -297,7 +297,7 @@ class LQRController:
         # Update time index
         self.idx += 1
 
-        return uav_ctrl_M, uav_ctrl_f
+        return np.array([f_collective, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]])
 
     def plot_graph(self):
         t = self.time_arr

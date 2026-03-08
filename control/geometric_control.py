@@ -94,18 +94,15 @@ class GeometricTrackingController:
 
         # Compute desired thrust vector in world frame
         e3 = np.array([0.0, 0.0, 1.0])
-        f_n = -(-self.kx * ex - self.kv * ev - mass *
-                g * e3 + mass * ad)
+        f_dir = -(-self.kx * ex - self.kv * ev - mass * g * e3 + mass * ad)
+        f_collective = np.dot(f_dir, R @ e3)
 
         # Desired orientation
         b1d = np.array([np.cos(yaw_d), np.sin(yaw_d), 0.0])
-        b3d = f_n / np.linalg.norm(f_n)
+        b3d = f_dir / np.linalg.norm(f_dir)
         b2d = np.cross(b3d, b1d)
         b1d_proj = np.cross(b2d, b3d)
         Rd = np.column_stack((b1d_proj, b2d, b3d))
-
-        # Total thrust (scalar, body z-direction)
-        f_total = np.dot(f_n, R @ e3)
 
         # Attitude errors
         Rdt = Rd.T
@@ -120,9 +117,6 @@ class GeometricTrackingController:
 
         uav_ctrl_M = -self.kR * eR - self.kW * eW + M_ff
 
-        # Control force (in world frame)
-        uav_ctrl_f = f_total * R @ e3
-
         # Record data for plotting
         self.time_arr[self.idx] = self.idx * self.dt
         self.eR_prv_arr[self.idx] = eR_prv
@@ -131,12 +125,12 @@ class GeometricTrackingController:
         self.ex_arr[:, self.idx] = ex
         self.ev_arr[:, self.idx] = ev
         self.M_arr[:, self.idx] = uav_ctrl_M
-        self.f_arr[self.idx] = f_total
+        self.f_arr[self.idx] = f_collective
 
         # Update time index
         self.idx += 1
 
-        return uav_ctrl_M, uav_ctrl_f
+        return np.array([f_collective, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]])
 
     def plot_graph(self):
         # Plot control inputs

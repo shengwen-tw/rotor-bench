@@ -6,6 +6,7 @@ import yaml
 
 from models.dynamics import Dynamics
 from models.se3_math import NumpySE3
+from models.thrust_allocator import ThrustAllocator
 from control.geometric_control import GeometricMomentController
 from viz.rigidbody_visualize import QuadRenderer
 from gymnasium import spaces
@@ -30,8 +31,11 @@ class QuadrotorEnv(gym.Env):
         vehicle_path = 'configs/vehicles/' + args.vehicle_cfg
         with open(vehicle_path) as f:
             cfg = yaml.safe_load(f)
+        multirotor_model = cfg["model"]
         mass = float(cfg["mass"])
         J = np.array(cfg["inertia"], dtype=np.float32)        
+        arm_length = float(cfg["arm_length"])
+        c_fau_f = float(cfg["thrust_to_torque"])
 
         # Initialize quadrotor dynamics
         if uav_dynamics == None:
@@ -76,6 +80,11 @@ class QuadrotorEnv(gym.Env):
 
         # Initialize moment controller for reinforcement learning
         self.moment_controller = GeometricMomentController()
+
+        # Control allocation parameters
+        self.thrust_allocator = ThrustAllocator(
+            model=multirotor_model, d=arm_length, c_fau_f=c_fau_f
+        )
 
         # Get random seed
         self.np_random, _ = gym.utils.seeding.np_random(None)
@@ -208,28 +217,39 @@ class QuadrotorEnv(gym.Env):
         [roll_cmd, pitch_cmd, thrust_cmd] = action
         mass = self.uav_dynamics.get_mass()
         g = self.uav_dynamics.get_gravitational_acceleration()
-        R = self.uav_dynamics.get_rotmat()
         hover = mass * g
         # Map normalized thrust in [0, 1] to physical thrust [0, 3*hover]
         thrust_cmd = np.clip(thrust_cmd, 0.0, 1.0) * (3.0 * hover)
         uav_ctrl_M = self.moment_controller.run(
             self.uav_dynamics, roll_cmd, pitch_cmd, self.curr_yaw_d)
-        uav_ctrl_f = thrust_cmd * R @ np.array([0.0, 0.0, 1.0])
-        return [uav_ctrl_M, uav_ctrl_f]
+        return np.array(
+            [thrust_cmd, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]],
+            dtype=float
+        )
 
     def step(self, action):
         """action: control input from controller or reinfocement learning"""
-        uav_ctrl_M = None
-        uav_ctrl_f = None
 
         if self.args.ctrl == 'RL':
             # For reinforcement learning, the action input is desired roll,
             # pitch, and thrust commands
-            [uav_ctrl_M, uav_ctrl_f] = self.execute_rl_action(action)
+            control_input = self.execute_rl_action(action)
         else:
-            # For traditional controllers, the action input is 3x1 moment and
-            # force vectors
-            [uav_ctrl_M, uav_ctrl_f] = action
+            #control_input = np.array(action, dtype=float)
+            control_input = action
+
+        # Calculate motor thrusts from the control input
+        f_motors = self.thrust_allocator.motors_from_wrench(control_input)
+
+        # TODO: ESC model
+
+        # Real control input from ESC output to the multirotor dynamics
+        control_input = self.thrust_allocator.wrench_from_motors(f_motors)
+
+        # Convert control input into 3x1 force / moment vectors
+        R = self.uav_dynamics.get_rotmat()
+        uav_ctrl_M = control_input[1:4]
+        uav_ctrl_f = control_input[0] * R[:, 2]
 
         # Update quadrotor dyanmics
         self.uav_dynamics.set_moment(uav_ctrl_M)
