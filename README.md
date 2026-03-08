@@ -67,17 +67,25 @@ tensorboard --logdir runs/ppo_quadrotor
 
 ```
 rotor-bench/
-├── main.py                 # Entry point of the simulation
-├── train_rl.py             # RL training script
-├── trajectory_planner.py   # Trajectory planner
-├── models/                 # Dynamics and SE(3) math
-│   ├── dynamics.py
-│   ├── quadrotor.py
-│   └── se3_math.py
-├── control/                # Controllers (geometric, LQR, H∞, RL)
-├── configs/                # Vehicle and trajectory configs
-├── viz/                    # 3D visualization
-├── assets/                 # Images and media
+├── main.py                  # Entry point of the simulation
+├── train_rl.py              # RL training script
+├── trajectory_planner.py    # Trajectory planner
+├── models/
+│   ├── dynamics.py          # Rigid-body dynamics
+│   ├── esc.py               # ESC model
+│   ├── quadrotor.py         # Gym-compatible quadrotor environment
+│   ├── se3_math.py          # SE(3) math utilities
+│   └── thrust_allocator.py  # Control allocation
+├── control/
+│   ├── care_sda.py          # CARE solver via SDA
+│   ├── geometric_control.py # Geometric controller
+│   ├── hinf_syn.py          # H∞ control synthesizer
+│   ├── hinfty_control.py    # H∞ controller
+│   ├── lqr_control.py       # LQR controller
+│   └── rl_control.py        # RL controller
+├── configs/                 # Vehicle and trajectory configs
+├── viz/                     # 3D visualization
+├── assets/                  # Images and media
 └── requirements.txt
 ```
 
