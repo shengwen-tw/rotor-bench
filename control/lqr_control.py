@@ -217,7 +217,7 @@ class LQRController:
         elapsed_time = t1 - t0
         return X, elapsed_time
 
-    def run(self, env):
+    def run(self, env, record: bool = True):
         # Desired values (i.e., reference signals)
         [xd, vd, ad, yaw_d, Wd, W_dot_d] = env.get_desired_state()
 
@@ -283,19 +283,20 @@ class LQRController:
         # Control moment (3x1 vector in body-fixed frame)
         uav_ctrl_M = u[1:4]
 
-        # Record data for plotting
-        self.time_arr[self.idx] = self.idx * self.dt
-        self.euler_arr[:, self.idx] = np.rad2deg(np.array(eulers))
-        self.W_arr[:, self.idx] = np.rad2deg(W)
-        self.ex_arr[:, self.idx] = x - xd
-        self.ev_arr[:, self.idx] = v - vd
-        self.M_arr[:, self.idx] = uav_ctrl_M
-        self.f_arr[self.idx] = u[0]
-        self.sda_time_arr[self.idx] = sda_time
-        self.care_residual_arr[self.idx] = care_residual
+        if record:
+            # Record data for plotting
+            self.time_arr[self.idx] = self.idx * self.dt
+            self.euler_arr[:, self.idx] = np.rad2deg(np.array(eulers))
+            self.W_arr[:, self.idx] = np.rad2deg(W)
+            self.ex_arr[:, self.idx] = x - xd
+            self.ev_arr[:, self.idx] = v - vd
+            self.M_arr[:, self.idx] = uav_ctrl_M
+            self.f_arr[self.idx] = u[0]
+            self.sda_time_arr[self.idx] = sda_time
+            self.care_residual_arr[self.idx] = care_residual
 
-        # Update time index
-        self.idx += 1
+            # Update time index
+            self.idx += 1
 
         return np.array([f_collective, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]])
 

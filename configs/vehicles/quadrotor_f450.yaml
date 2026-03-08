@@ -1,8 +1,13 @@
 model: "quadrotor"
-mass: 1 # [kg]
+mass: 1  # [kg]
 inertia: # [kg*m^2]
   - [0.01466, 0.0, 0.0]
   - [0.0, 0.01466, 0.0]
   - [0.0, 0.0, 0.02848]
-arm_length: 0.225  # [m]
-thrust_to_torque: 0.009012  # [m]
+arm_length: 0.225          # [m]
+thrust_to_torque: 0.009012 # [m]
+
+# Electronic Speed Controller (ESC)
+esc_Ct: 9.339e-6   # Rotation-speed-to-thrust coefficient, [N/(rad/s)^2]
+esc_tau_up: 0.03   # ESC acceleration time constant, [s]
+esc_tau_down: 0.05 # ESC deceleration time constant, [s]

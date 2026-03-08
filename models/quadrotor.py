@@ -5,6 +5,7 @@ import numpy as np
 import yaml
 
 from models.dynamics import Dynamics
+from models.esc import ESC
 from models.se3_math import NumpySE3
 from models.thrust_allocator import ThrustAllocator
 from control.geometric_control import GeometricMomentController
@@ -36,6 +37,9 @@ class QuadrotorEnv(gym.Env):
         J = np.array(cfg["inertia"], dtype=np.float32)        
         arm_length = float(cfg["arm_length"])
         c_fau_f = float(cfg["thrust_to_torque"])
+        esc_Ct = float(cfg["esc_Ct"])
+        esc_tau_up = float(cfg["esc_tau_up"])
+        esc_tau_down = float(cfg["esc_tau_down"])
 
         # Initialize quadrotor dynamics
         if uav_dynamics == None:
@@ -85,6 +89,14 @@ class QuadrotorEnv(gym.Env):
         self.thrust_allocator = ThrustAllocator(
             model=multirotor_model, d=arm_length, c_fau_f=c_fau_f
         )
+
+        # Electronic speed controller (ESC)
+        if multirotor_model == "quadrotor":
+            motor_count = 4
+        else:
+            raise ValueError(f"Unsupported model for ESCs: {multirotor_model}")
+        self.escs = [ESC(Ct=esc_Ct, tau_up=esc_tau_up, tau_down=esc_tau_down)
+                     for _ in range(motor_count)]
 
         # Get random seed
         self.np_random, _ = gym.utils.seeding.np_random(None)
@@ -147,6 +159,8 @@ class QuadrotorEnv(gym.Env):
         self.euler_arr = np.zeros((3, self.iterations))
         self.W_dot_arr = np.zeros((3, self.iterations))
         self.W_arr = np.zeros((3, self.iterations))
+        self.ideal_rpm_arr = np.zeros((len(self.escs), self.iterations))
+        self.esc_rpm_arr = np.zeros((len(self.escs), self.iterations))
 
         # Current desired values (i.e., reference signals)
         self.curr_xd = self.xd[:, 0]
@@ -159,6 +173,16 @@ class QuadrotorEnv(gym.Env):
         # Return data for reinforcement learning
         obs = self.get_observation()
         return obs, {}
+
+    def reset_esc(self, action):
+        if self.args.ctrl == 'RL':
+            control_input = self.execute_rl_action(action)
+        else:
+            control_input = np.array(action, dtype=float)
+
+        f_motors_cmd = self.thrust_allocator.motors_from_wrench(control_input)
+        for i in range(len(self.escs)):
+            self.escs[i].reset(float(f_motors_cmd[i]))
 
     def compute_reward(self):
         """Compute reward for reinforcement learning"""
@@ -227,6 +251,19 @@ class QuadrotorEnv(gym.Env):
             dtype=float
         )
 
+    def apply_esc(self, f_motors_cmd: np.ndarray):
+        f_motors = np.zeros(len(self.escs), dtype=float)
+        for i in range(len(self.escs)):
+            # Calculate RPM from thrust input and feed to the ESC model
+            esc_rpm_cmd = self.escs[i].thrust_to_rpm(float(f_motors_cmd[i]))
+            self.escs[i].set_target_force(float(f_motors_cmd[i]), self.dt)
+            f_motors[i] = self.escs[i].get_actual_force()
+
+            # Record data for plotting
+            self.ideal_rpm_arr[i, self.idx] = esc_rpm_cmd
+            self.esc_rpm_arr[i, self.idx] = self.escs[i].get_actual_rpm()
+        return f_motors
+
     def step(self, action):
         """action: control input from controller or reinfocement learning"""
 
@@ -235,13 +272,14 @@ class QuadrotorEnv(gym.Env):
             # pitch, and thrust commands
             control_input = self.execute_rl_action(action)
         else:
-            #control_input = np.array(action, dtype=float)
             control_input = action
 
         # Calculate motor thrusts from the control input
         f_motors = self.thrust_allocator.motors_from_wrench(control_input)
 
-        # TODO: ESC model
+        # ESC model # TODO: Add RL support
+        if self.args.ctrl != 'RL':        
+            f_motors = self.apply_esc(f_motors)
 
         # Real control input from ESC output to the multirotor dynamics
         control_input = self.thrust_allocator.wrench_from_motors(f_motors)
@@ -390,6 +428,19 @@ class QuadrotorEnv(gym.Env):
         plt.ylabel("Y [m]")
         plt.axis("equal")
         plt.legend()
+
+        # Motor RPM (ideal vs ESC)
+        plt.figure("Motor RPM")
+        for i in range(4):
+            plt.subplot(4, 1, i + 1)
+            plt.plot(self.time_arr, self.ideal_rpm_arr[i, :], label=f"ideal_{i+1}")
+            plt.plot(self.time_arr, self.esc_rpm_arr[i, :], label=f"esc_{i+1}")
+            plt.grid(True)
+            if i == 0:
+                plt.title("Motor RPM (ideal vs ESC)")
+            plt.xlabel("time [s]")
+            plt.ylabel("rpm")
+            plt.legend()
 
     def plot(self):
         if self.args.plot == 'yes':

@@ -204,7 +204,7 @@ class HinfController:
 
         return A
 
-    def run(self, env):
+    def run(self, env, record: bool = True):
         # Desired values (i.e., reference signals)
         [xd, vd, ad, yaw_d, Wd, W_dot_d] = env.get_desired_state()
 
@@ -272,22 +272,23 @@ class HinfController:
         # Control moment (3x1 vector in body-fixed frame)
         uav_ctrl_M = u[1:4]
 
-        # Record data for plotting
-        self.time_arr[self.idx] = self.idx * self.dt
-        self.euler_arr[:, self.idx] = np.rad2deg(np.array(eulers))
-        self.W_arr[:, self.idx] = np.rad2deg(W)
-        self.ex_arr[:, self.idx] = x - xd
-        self.ev_arr[:, self.idx] = v - vd
-        self.M_arr[:, self.idx] = uav_ctrl_M
-        self.f_arr[self.idx] = u[0]
-        self.hinf_time_arr[self.idx] = hinf_time
-        self.ric_residual_arr[self.idx] = ric_residual
-        self.gamma_arr[self.idx] = gamma
-        self.gamma_lb_arr[self.idx] = gamma_lb
-        self.X_cond_arr[self.idx] = np.linalg.cond(X)
+        if record:
+            # Record data for plotting
+            self.time_arr[self.idx] = self.idx * self.dt
+            self.euler_arr[:, self.idx] = np.rad2deg(np.array(eulers))
+            self.W_arr[:, self.idx] = np.rad2deg(W)
+            self.ex_arr[:, self.idx] = x - xd
+            self.ev_arr[:, self.idx] = v - vd
+            self.M_arr[:, self.idx] = uav_ctrl_M
+            self.f_arr[self.idx] = u[0]
+            self.hinf_time_arr[self.idx] = hinf_time
+            self.ric_residual_arr[self.idx] = ric_residual
+            self.gamma_arr[self.idx] = gamma
+            self.gamma_lb_arr[self.idx] = gamma_lb
+            self.X_cond_arr[self.idx] = np.linalg.cond(X)
 
-        # Update time index
-        self.idx += 1
+            # Update time index
+            self.idx += 1
 
         return np.array([f_collective, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]])
 

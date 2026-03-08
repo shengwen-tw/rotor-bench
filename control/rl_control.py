@@ -13,7 +13,7 @@ class RLController:
     def reset(self):
         pass
 
-    def run(self, env):
+    def run(self, env, record: bool = True):
         obs = env.get_observation()
         action, _ = self.model.predict(
             obs, deterministic=self.args.deterministic)

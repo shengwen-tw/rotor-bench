@@ -93,6 +93,7 @@ def main(args):
 
     # Simulation loop
     obs, _ = env.reset()
+    env.reset_esc(controller.run(env, record=False))
     for i in trange(args.iterations, desc="Simulation"):
         action = controller.run(env)
         obs, reward, terminated, truncated, info = env.step(action)

@@ -74,7 +74,7 @@ class GeometricTrackingController:
         self.M_arr = np.zeros((3, self.iterations))
         self.f_arr = np.zeros(self.iterations)
 
-    def run(self, env):
+    def run(self, env, record: bool = True):
         # Desired values (i.e., reference signals)
         [xd, vd, ad, yaw_d, Wd, W_dot_d] = env.get_desired_state()
 
@@ -117,18 +117,19 @@ class GeometricTrackingController:
 
         uav_ctrl_M = -self.kR * eR - self.kW * eW + M_ff
 
-        # Record data for plotting
-        self.time_arr[self.idx] = self.idx * self.dt
-        self.eR_prv_arr[self.idx] = eR_prv
-        self.eR_arr[:, self.idx] = eR
-        self.eW_arr[:, self.idx] = eW
-        self.ex_arr[:, self.idx] = ex
-        self.ev_arr[:, self.idx] = ev
-        self.M_arr[:, self.idx] = uav_ctrl_M
-        self.f_arr[self.idx] = f_collective
+        if record:
+            # Record data for plotting
+            self.time_arr[self.idx] = self.idx * self.dt
+            self.eR_prv_arr[self.idx] = eR_prv
+            self.eR_arr[:, self.idx] = eR
+            self.eW_arr[:, self.idx] = eW
+            self.ex_arr[:, self.idx] = ex
+            self.ev_arr[:, self.idx] = ev
+            self.M_arr[:, self.idx] = uav_ctrl_M
+            self.f_arr[self.idx] = f_collective
 
-        # Update time index
-        self.idx += 1
+            # Update time index
+            self.idx += 1
 
         return np.array([f_collective, uav_ctrl_M[0], uav_ctrl_M[1], uav_ctrl_M[2]])
 
