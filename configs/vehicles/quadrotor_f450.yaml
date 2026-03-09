@@ -11,3 +11,10 @@ thrust_to_torque: 0.009012 # [m]
 esc_Ct: 9.339e-6   # Rotation-speed-to-thrust coefficient, [N/(rad/s)^2]
 esc_tau_up: 0.03   # ESC acceleration time constant, [s]
 esc_tau_down: 0.05 # ESC deceleration time constant, [s]
+
+# Battery model
+esc_battery_model: true
+esc_v_max: 12.6  # [V]
+esc_v_min: 9.0   # [V]
+esc_v_k: 0.005   # [1/s]
+esc_alpha: 0.125 # [1/V]

@@ -3,9 +3,10 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+import torch
 
 from models.dynamics import Dynamics
-from models.esc import ESC
+from models.esc import ESC, BatteryModel
 from models.se3_math import NumpySE3
 from models.thrust_allocator import ThrustAllocator
 from control.geometric_control import GeometricMomentController
@@ -40,6 +41,16 @@ class QuadrotorEnv(gym.Env):
         esc_Ct = float(cfg["esc_Ct"])
         esc_tau_up = float(cfg["esc_tau_up"])
         esc_tau_down = float(cfg["esc_tau_down"])
+        esc_v_max = cfg.get("esc_v_max", None)
+        esc_v_min = cfg.get("esc_v_min", None)
+        esc_v_k = float(cfg.get("esc_v_k", 0.0))
+        esc_alpha = float(cfg.get("esc_alpha", 0.0))
+        esc_battery_model = bool(cfg.get("esc_battery_model", True))
+        self.esc_v_max = esc_v_max
+        self.esc_v_min = esc_v_min
+        self.esc_v_k = esc_v_k
+        self.esc_alpha = esc_alpha
+        self.esc_battery_model = esc_battery_model
 
         # Initialize quadrotor dynamics
         if uav_dynamics == None:
@@ -90,12 +101,26 @@ class QuadrotorEnv(gym.Env):
             model=multirotor_model, d=arm_length, c_fau_f=c_fau_f
         )
 
+        # Battery model
+        if esc_battery_model:
+            battery_model = BatteryModel(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                v_max=esc_v_max,
+                v_min=esc_v_min,
+                v_k=esc_v_k,
+                alpha=esc_alpha,
+            )
+        else:
+            battery_model = None
+
         # Electronic speed controller (ESC)
         if multirotor_model == "quadrotor":
             motor_count = 4
         else:
             raise ValueError(f"Unsupported model for ESCs: {multirotor_model}")
-        self.escs = [ESC(Ct=esc_Ct, tau_up=esc_tau_up, tau_down=esc_tau_down)
+        self.escs = [ESC(Ct=esc_Ct, tau_up=esc_tau_up, tau_down=esc_tau_down,
+                         battery=battery_model)
                      for _ in range(motor_count)]
 
         # Get random seed
@@ -161,6 +186,8 @@ class QuadrotorEnv(gym.Env):
         self.W_arr = np.zeros((3, self.iterations))
         self.ideal_rpm_arr = np.zeros((len(self.escs), self.iterations))
         self.esc_rpm_arr = np.zeros((len(self.escs), self.iterations))
+        self.voltage_arr = np.full(self.iterations, np.nan, dtype=float)
+        self.eta_arr = np.full(self.iterations, np.nan, dtype=float)
 
         # Current desired values (i.e., reference signals)
         self.curr_xd = self.xd[:, 0]
@@ -169,10 +196,29 @@ class QuadrotorEnv(gym.Env):
         self.curr_yaw_d = self.yaw_d[0]
         self.curr_Wd = self.Wd
         self.curr_W_dot_d = self.W_dot_d
+        self._reset_voltage_profile()
 
         # Return data for reinforcement learning
         obs = self.get_observation()
         return obs, {}
+
+    def _reset_voltage_profile(self):
+        if not self.esc_battery_model:
+            return
+        time_arr = np.arange(self.iterations, dtype=float) * self.dt
+        voltage = self.esc_v_min + (self.esc_v_max - self.esc_v_min) * np.exp(
+            -self.esc_v_k * time_arr
+        )
+        self.voltage_arr[:] = voltage
+        if self.esc_alpha == 0.0:
+            denom = (self.esc_v_max - self.esc_v_min)
+            if denom == 0.0:
+                self.eta_arr[:] = 0.0
+            else:
+                self.eta_arr[:] = (voltage - self.esc_v_min) / denom
+        else:
+            denom = np.exp(self.esc_alpha * (self.esc_v_max - self.esc_v_min)) - 1.0
+            self.eta_arr[:] = (np.exp(self.esc_alpha * (voltage - self.esc_v_min)) - 1.0) / denom
 
     def reset_esc(self, action):
         if self.args.ctrl == 'RL':
@@ -253,6 +299,9 @@ class QuadrotorEnv(gym.Env):
 
     def apply_esc(self, f_motors_cmd: np.ndarray):
         f_motors = np.zeros(len(self.escs), dtype=float)
+        t = self.idx * self.dt
+        for esc in self.escs:
+            esc.set_time(t)
         for i in range(len(self.escs)):
             # Calculate RPM from thrust input and feed to the ESC model
             esc_rpm_cmd = self.escs[i].thrust_to_rpm(float(f_motors_cmd[i]))
@@ -441,6 +490,21 @@ class QuadrotorEnv(gym.Env):
             plt.xlabel("time [s]")
             plt.ylabel("rpm")
             plt.legend()
+
+        # Voltage and efficiency
+        if not np.isnan(self.voltage_arr).all():
+            plt.figure("Voltage and Efficiency")
+            plt.subplot(2, 1, 1)
+            plt.plot(self.time_arr, self.voltage_arr)
+            plt.grid(True)
+            plt.title("Voltage and Efficiency")
+            plt.xlabel("time [s]")
+            plt.ylabel("voltage [V]")
+            plt.subplot(2, 1, 2)
+            plt.plot(self.time_arr, self.eta_arr)
+            plt.grid(True)
+            plt.xlabel("time [s]")
+            plt.ylabel("eta [-]")
 
     def plot(self):
         if self.args.plot == 'yes':
