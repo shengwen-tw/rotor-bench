@@ -12,7 +12,7 @@ A compact quadrotor flight simulator written in Python, designed for benchmarkin
    GPU-accelerated batched rollouts are supported for RL training.
 
 3. **Multiple controllers included**  
-   Geometric tracking, LQR, H∞, and RL controllers are available out of the box.
+   Geometric, LQR, H∞, NMPC, and RL controllers are available out of the box.
 
 4. **Trajectory planning and visualization**  
    Planned reference trajectories and animated 3D visualization of quadrotor motion.
@@ -41,6 +41,12 @@ python main.py --ctrl=LQR
 
 ```bash
 python main.py --ctrl=HINFTY_CTRL
+```
+
+### Nonlinear Model Predictive Control (NMPC)
+
+```bash
+python main.py --ctrl=NMPC
 ```
 
 ### Reinforcement Learning (Experimental)
@@ -82,6 +88,7 @@ rotor-bench/
 │   ├── hinf_syn.py          # H∞ control synthesizer
 │   ├── hinfty_control.py    # H∞ controller
 │   ├── lqr_control.py       # LQR controller
+│   ├── nmpc.py              # Nonlinear model predictive controller
 │   └── rl_control.py        # RL controller
 ├── configs/                 # Vehicle and trajectory configs
 ├── viz/                     # 3D visualization

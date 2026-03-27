@@ -8,6 +8,7 @@ from models.se3_math import NumpySE3
 from control.geometric_control import GeometricTrackingController
 from control.hinfty_control import HinfController
 from control.lqr_control import LQRController
+from control.nmpc import NMPCController
 from control.rl_control import RLController
 
 
@@ -45,7 +46,8 @@ def parse_args():
     parser.add_argument('--iterations', type=int,
                         default=20000, help='Number of iterations')
     parser.add_argument('--ctrl', type=str, default='GEOMETRIC_CTRL',
-                        choices=['GEOMETRIC_CTRL', 'LQR', 'HINFTY_CTRL', 'RL'],
+                        choices=['GEOMETRIC_CTRL', 'NMPC',
+                                 'LQR', 'HINFTY_CTRL', 'RL'],
                         help='Controller (GEOMETRIC_CTRL or RL)')
     parser.add_argument('--traj', type=str, default='EIGHT',
                         help='Trajectory to track (EIGHT, CIRCLE or HOVERING)')
@@ -76,6 +78,8 @@ def main(args):
     controller = None
     if args.ctrl == 'GEOMETRIC_CTRL':
         controller = GeometricTrackingController(args)
+    elif args.ctrl == 'NMPC':
+        controller = NMPCController(args)
     elif args.ctrl == 'LQR':
         controller = LQRController(args)
     elif args.ctrl == 'HINFTY_CTRL':

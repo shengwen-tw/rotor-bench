@@ -1,3 +1,4 @@
+casadi
 gymnasium
 matplotlib
 numpy
