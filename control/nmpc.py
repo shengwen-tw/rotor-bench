@@ -3,66 +3,80 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-class NMPCController:
+class NMPC:
     def __init__(self, args):
         self.iterations = args.iterations
         self.dt = args.dt
 
-        self.Np = 20
-        self.nx = 18
-        self.nu = 4
-
-        self.Qy = np.diag([400.0, 400.0, 750.0, 100.0, 100.0, 200.0, 0.5, 0.5, 0.2])
-        self.Qu = np.diag([0.002, 0.02, 0.02, 0.01])
-        self.KR = 0#1.0
         self.psi_weights = np.array([1.0, 1.0, 1.0])
 
+        # Step for state horizon
+        self.Np = 20
+
+        # Dimension of the state
+        self.x_dim = 18
+
+        # Dimension of the control input
+        self.u_dim = 4
+
+        # State error penalty weights
+        self.Qy = np.zeros((9, 9))
+        self.Qy[0, 0] = 400.0  # px
+        self.Qy[1, 1] = 400.0  # py
+        self.Qy[2, 2] = 750.0  # pz
+        self.Qy[3, 3] = 100.0  # vx
+        self.Qy[4, 4] = 100.0  # vy
+        self.Qy[5, 5] = 200.0  # vz
+        self.Qy[6, 6] = 0.5   # Wx
+        self.Qy[7, 7] = 0.5   # Wy
+        self.Qy[8, 8] = 0.5   # Wz
+        self.KR = 1.0
+
+        # Control penalty weights
+        self.Qu = np.zeros((4, 4))
+        self.Qu[0, 0] = 0.002  # fc
+        self.Qu[1, 1] = 0.02  # Mx
+        self.Qu[2, 2] = 0.02  # My
+        self.Qu[3, 3] = 0.01  # Mz
+
+        # Constraints for control imputs
         self.f_min = 0.0
         self.f_max = 25.0
         self.M_min = np.array([-10.0, -10.0, -10])
-        self.M_max = np.array([10.0, 10.0, 10])
+        self.M_max = np.array([+10.0, +10.0, +10])
 
+        # CasADi solver
         self.solver = None
         self.last_solution = None
-        self._build_solver()
+        self.build_solver()
+
+        # Reset data
         self.reset()
 
     def reset(self):
         self.idx = 0
         self.time_arr = np.zeros(self.iterations)
         self.cost_arr = np.zeros(self.iterations)
-        self.psi_arr = np.zeros(self.iterations)
         self.ex_arr = np.zeros((3, self.iterations))
         self.ev_arr = np.zeros((3, self.iterations))
+        self.eW_arr = np.zeros((3, self.iterations))
         self.W_arr = np.zeros((3, self.iterations))
+        self.M_arr = np.zeros((3, self.iterations))
+        self.f_arr = np.zeros(self.iterations)
         self.u_arr = np.zeros((4, self.iterations))
         self.last_solution = None
 
-    @staticmethod
-    def skew_np(w):
-        return np.array([
-            [0.0, -w[2], w[1]],
-            [w[2], 0.0, -w[0]],
-            [-w[1], w[0], 0.0],
-        ])
-
-    @staticmethod
-    def skew_ca(w):
+    def skew_sym_matrix(self, w):
         return ca.vertcat(
             ca.horzcat(0.0, -w[2], w[1]),
             ca.horzcat(w[2], 0.0, -w[0]),
             ca.horzcat(-w[1], w[0], 0.0),
         )
 
-    def cayley_np(self, w):
-        I = np.eye(3)
-        A = 0.5 * self.skew_np(w)
-        return (I + A) @ np.linalg.inv(I - A)
-
-    def cayley_ca(self, w):
+    def cayley_transform(self, w):
         I = ca.DM.eye(3)
-        A = 0.5 * self.skew_ca(w)
-        return ca.mtimes(I + A, ca.inv(I - A))
+        A = 0.5 * self.skew_sym_matrix(w)
+        return ca.solve(I - A, I + A)
 
     def pack_state(self, x, v, R, W):
         return np.concatenate([x, v, R.reshape(-1, order='F'), W])
@@ -74,24 +88,17 @@ class NMPCController:
         W = state[15:18]
         return x, v, R, W
 
-    def rotation_error_np(self, R, Rd):
-        psi_axes = np.zeros(3)
-        for axis in range(3):
-            e = np.zeros(3)
-            e[axis] = 1.0
-            psi_axes[axis] = 1.0 - np.dot(R @ e, Rd @ e)
-        return float(np.dot(self.psi_weights, psi_axes))
-
-    def rotation_error_ca(self, R, Rd):
+    def rotational_cost(self, R, Rd):
         psi = 0
         for axis in range(3):
-            psi += self.psi_weights[axis] * (1.0 - ca.dot(R[:, axis], Rd[:, axis]))
+            psi += self.psi_weights[axis] * \
+                (1.0 - ca.dot(R[:, axis], Rd[:, axis]))
         return psi
 
-    def observe_ca(self, state):
+    def observation(self, state):
         return ca.vertcat(state[0:3], state[3:6], state[15:18])
 
-    def discrete_update_ca(self, state, control, mass, J, g):
+    def dynamics_update(self, state, control, mass, J, g):
         x = state[0:3]
         v = state[3:6]
         R = ca.reshape(state[6:15], 3, 3)
@@ -108,7 +115,7 @@ class NMPCController:
         J_inv = ca.inv(J)
         W_dot = ca.mtimes(J_inv, -ca.cross(W, ca.mtimes(J, W)) + M)
         W_half = W + 0.5 * self.dt * W_dot
-        R_next = ca.mtimes(R, self.cayley_ca(W_half * self.dt))
+        R_next = ca.mtimes(R, self.cayley_transform(W_half * self.dt))
         W_next = W_half + 0.5 * self.dt * W_dot
 
         return ca.vertcat(x_next, v_next, ca.reshape(R_next, 9, 1), W_next)
@@ -127,43 +134,38 @@ class NMPCController:
 
         return np.concatenate(y_ref), np.concatenate(R_ref)
 
-    def _build_solver(self):
-        X = ca.SX.sym('X', self.nx, self.Np + 1)
-        U = ca.SX.sym('U', self.nu, self.Np)
+    def build_solver(self):
+        X = ca.SX.sym('X', self.x_dim, self.Np + 1)
+        U = ca.SX.sym('U', self.u_dim, self.Np)
 
-        x0_param = ca.SX.sym('x0', self.nx)
+        x0_param = ca.SX.sym('x0', self.x_dim)
         y_ref_param = ca.SX.sym('y_ref', 9 * self.Np)
         R_ref_param = ca.SX.sym('R_ref', 9 * self.Np)
         mass_param = ca.SX.sym('mass')
         g_param = ca.SX.sym('g')
         J_param = ca.SX.sym('J', 3, 3)
 
-        params = ca.vertcat(
-            x0_param,
-            y_ref_param,
-            R_ref_param,
-            mass_param,
-            g_param,
-            ca.reshape(J_param, 9, 1),
-        )
+        params = ca.vertcat(x0_param, y_ref_param, R_ref_param, mass_param,
+                            g_param, ca.reshape(J_param, 9, 1),)
 
         obj = 0
         g = [X[:, 0] - x0_param]
 
         for k in range(self.Np):
-            yk = self.observe_ca(X[:, k])
+            yk = self.observation(X[:, k])
             y_ref_k = y_ref_param[9 * k:9 * (k + 1)]
             Rk = ca.reshape(X[6:15, k], 3, 3)
             Rd_k = ca.reshape(R_ref_param[9 * k:9 * (k + 1)], 3, 3)
             uk = U[:, k]
 
             ey = yk - y_ref_k
-            psi = self.rotation_error_ca(Rk, Rd_k)
+            psi = self.rotational_cost(Rk, Rd_k)
             obj += ca.mtimes([ey.T, self.Qy, ey])
             obj += self.KR * psi * psi
             obj += ca.mtimes([uk.T, self.Qu, uk])
 
-            x_next = self.discrete_update_ca(X[:, k], uk, mass_param, J_param, g_param)
+            x_next = self.dynamics_update(
+                X[:, k], uk, mass_param, J_param, g_param)
             g.append(X[:, k + 1] - x_next)
 
         decision_vars = ca.vertcat(ca.reshape(X, -1, 1), ca.reshape(U, -1, 1))
@@ -181,8 +183,8 @@ class NMPCController:
         self.lbg = np.zeros(constraints.shape[0])
         self.ubg = np.zeros(constraints.shape[0])
 
-        x_block = np.full(self.nx * (self.Np + 1), -np.inf)
-        x_block_upper = np.full(self.nx * (self.Np + 1), np.inf)
+        x_block = np.full(self.x_dim * (self.Np + 1), -np.inf)
+        x_block_upper = np.full(self.x_dim * (self.Np + 1), np.inf)
         u_lb = np.tile(np.concatenate([[self.f_min], self.M_min]), self.Np)
         u_ub = np.tile(np.concatenate([[self.f_max], self.M_max]), self.Np)
         self.lbx = np.concatenate([x_block, u_lb])
@@ -206,26 +208,22 @@ class NMPCController:
         ])
 
     def solve_nmpc(self, x0, y_ref, R_ref, mass, J, g):
-        params = np.concatenate([
-            x0,
-            y_ref,
-            R_ref,
-            np.array([mass, g]),
-            J.reshape(-1, order='F'),
-        ])
+        params = np.concatenate([x0, y_ref, R_ref, np.array([mass, g]),
+                                J.reshape(-1, order='F')])
 
         init_guess = self.build_initial_guess(x0, mass, g)
         sol = self.solver(x0=init_guess, lbx=self.lbx, ubx=self.ubx,
                           lbg=self.lbg, ubg=self.ubg, p=params)
 
         w_opt = np.array(sol['x']).flatten()
-        x_size = self.nx * (self.Np + 1)
-        X_opt = w_opt[:x_size].reshape((self.nx, self.Np + 1), order='F')
-        U_opt = w_opt[x_size:].reshape((self.nu, self.Np), order='F')
+        x_size = self.x_dim * (self.Np + 1)
+        X_opt = w_opt[:x_size].reshape((self.x_dim, self.Np + 1), order='F')
+        U_opt = w_opt[x_size:].reshape((self.u_dim, self.Np), order='F')
         self.last_solution = {'X': X_opt, 'U': U_opt}
         return X_opt, U_opt, float(sol['f'])
 
     def run(self, env, record: bool = True):
+        # States and parameters
         mass = env.uav_dynamics.get_mass()
         J = env.uav_dynamics.get_inertia_matrix()
         g = env.uav_dynamics.get_gravitational_acceleration()
@@ -234,53 +232,112 @@ class NMPCController:
         R = env.uav_dynamics.get_rotmat()
         W = env.uav_dynamics.get_angular_velocity()
 
+        # Solve nonlinear model predictive control problem
         x0 = self.pack_state(x, v, R, W)
         y_ref, R_ref = self.build_reference_horizon(env)
-        _, U_opt, total_cost = self.solve_nmpc(x0, y_ref, R_ref, mass, J, g)
+        X_opt, U_opt, total_cost = self.solve_nmpc(x0, y_ref, R_ref, mass, J, g)
         u = U_opt[:, 0]
 
         if record:
+            # Record data for plotting
             ex = x - y_ref[0:3]
             ev = v - y_ref[3:6]
-            psi = self.rotation_error_np(R, np.eye(3))
+            eW = W
             self.time_arr[self.idx] = self.idx * self.dt
             self.cost_arr[self.idx] = total_cost
-            self.psi_arr[self.idx] = psi
+            self.eW_arr[:, self.idx] = eW
             self.ex_arr[:, self.idx] = ex
             self.ev_arr[:, self.idx] = ev
             self.W_arr[:, self.idx] = W
+            self.M_arr[:, self.idx] = u[1:4]
+            self.f_arr[self.idx] = u[0]
             self.u_arr[:, self.idx] = u
+
+            # Record data for plotting
             self.idx += 1
 
         return np.array([u[0], u[1], u[2], u[3]])
 
     def plot_graph(self):
-        plt.figure("NMPC control inputs")
-        labels = ["f_c", "M_x", "M_y", "M_z"]
-        for i in range(4):
-            plt.subplot(4, 1, i + 1)
-            plt.plot(self.time_arr, self.u_arr[i, :])
-            plt.grid(True)
-            plt.ylabel(labels[i])
+        plt.figure("Control inputs")
+        plt.subplot(4, 1, 1)
+        plt.plot(self.time_arr, self.M_arr[0, :])
+        plt.grid(True)
+        plt.title("Control inputs")
         plt.xlabel("time [s]")
+        plt.ylabel("M_x")
+        plt.subplot(4, 1, 2)
+        plt.plot(self.time_arr, self.M_arr[1, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("M_y")
+        plt.subplot(4, 1, 3)
+        plt.plot(self.time_arr, self.M_arr[2, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("M_z")
+        plt.subplot(4, 1, 4)
+        plt.plot(self.time_arr, self.f_arr[:])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("f")
+
+        plt.figure("Angular rate error (eW)")
+        plt.subplot(3, 1, 1)
+        plt.plot(self.time_arr, np.rad2deg(self.eW_arr[0, :]))
+        plt.grid(True)
+        plt.title("Angular rate error (eW)")
+        plt.xlabel("time [s]")
+        plt.ylabel("x [deg/s]")
+        plt.subplot(3, 1, 2)
+        plt.plot(self.time_arr, np.rad2deg(self.eW_arr[1, :]))
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("y [deg/s]")
+        plt.subplot(3, 1, 3)
+        plt.plot(self.time_arr, np.rad2deg(self.eW_arr[2, :]))
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("z [deg/s]")
+
+        plt.figure("Position error")
+        plt.subplot(3, 1, 1)
+        plt.plot(self.time_arr, self.ex_arr[0, :])
+        plt.grid(True)
+        plt.title("Position error")
+        plt.xlabel("time [s]")
+        plt.ylabel("x [m]")
+        plt.subplot(3, 1, 2)
+        plt.plot(self.time_arr, self.ex_arr[1, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("y [m]")
+        plt.subplot(3, 1, 3)
+        plt.plot(self.time_arr, self.ex_arr[2, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("z [m]")
+
+        plt.figure("Velocity error")
+        plt.subplot(3, 1, 1)
+        plt.plot(self.time_arr, self.ev_arr[0, :])
+        plt.grid(True)
+        plt.title("Velocity error")
+        plt.xlabel("time [s]")
+        plt.ylabel("x [m/s]")
+        plt.subplot(3, 1, 2)
+        plt.plot(self.time_arr, self.ev_arr[1, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("y [m/s]")
+        plt.subplot(3, 1, 3)
+        plt.plot(self.time_arr, self.ev_arr[2, :])
+        plt.grid(True)
+        plt.xlabel("time [s]")
+        plt.ylabel("z [m/s]")
 
         plt.figure("NMPC objective")
         plt.plot(self.time_arr, self.cost_arr)
         plt.grid(True)
         plt.xlabel("time [s]")
         plt.ylabel("cost")
-
-        plt.figure("NMPC rotation error")
-        plt.plot(self.time_arr, self.psi_arr)
-        plt.grid(True)
-        plt.xlabel("time [s]")
-        plt.ylabel("Psi(R)")
-
-        plt.figure("NMPC angular velocity")
-        labels = ["W_x", "W_y", "W_z"]
-        for i in range(3):
-            plt.subplot(3, 1, i + 1)
-            plt.plot(self.time_arr, np.rad2deg(self.W_arr[i, :]))
-            plt.grid(True)
-            plt.ylabel(labels[i] + " [deg/s]")
-        plt.xlabel("time [s]")

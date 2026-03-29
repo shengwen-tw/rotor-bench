@@ -8,7 +8,7 @@ from models.se3_math import NumpySE3
 from control.geometric_control import GeometricTrackingController
 from control.hinfty_control import HinfController
 from control.lqr_control import LQRController
-from control.nmpc import NMPCController
+from control.nmpc import NMPC
 from control.rl_control import RLController
 
 
@@ -79,7 +79,7 @@ def main(args):
     if args.ctrl == 'GEOMETRIC_CTRL':
         controller = GeometricTrackingController(args)
     elif args.ctrl == 'NMPC':
-        controller = NMPCController(args)
+        controller = NMPC(args)
     elif args.ctrl == 'LQR':
         controller = LQRController(args)
     elif args.ctrl == 'HINFTY_CTRL':
