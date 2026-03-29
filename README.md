@@ -91,9 +91,9 @@ rotor-bench/
 │   ├── geometric_control.py # Geometric controller
 │   ├── hinf_syn.py          # H∞ control synthesizer
 │   ├── hinfty_control.py    # H∞ controller
-│   ├── lqr_control.py       # LQR Controller
+│   ├── lqr_control.py       # LQR controller
 │   ├── nmpc.py              # Nonlinear MPC
-│   └── rl_control.py        # RL Controller
+│   └── rl_control.py        # RL controller
 ├── configs/                 # Vehicle and trajectory configs
 ├── viz/                     # 3D visualization
 ├── assets/                  # Images and media
