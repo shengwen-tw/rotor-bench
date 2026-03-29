@@ -1,21 +1,25 @@
 # RotorBench
 
-A compact quadrotor flight simulator written in Python, designed for benchmarking, fast prototyping, and academic research.
+A lightweight Python-based quadrotor flight simulator for benchmarking, rapid prototyping, and academic research.
 
 ## Features
 
 1. **Lightweight quadrotor simulator**  
-   Models quadrotor dynamics down to the force and torque level. Ideal for fast prototyping and algorithm testing.
-
-2. **SE(3) rigid-body dynamics**  
-   Accurate rigid-body updates using RK4 and the Cayley transform on SO(3).  
-   GPU-accelerated batched rollouts are supported for RL training.
-
-3. **Multiple controllers included**  
-   Geometric, LQR, H∞, NMPC, and RL controllers are available out of the box.
-
-4. **Trajectory planning and visualization**  
-   Planned reference trajectories and animated 3D visualization of quadrotor motion.
+   A pure Python implementation designed for rapid prototyping and low-level control algorithm development.
+2. **Physics engine**  
+   - Accurate SE(3) rigid-body dynamics update with *RK4 integration* and *Cayley transform*.  
+   - First-order delayed ESC (Electronic Speed Controller) model.  
+3. **GPU-accelerated batched rollouts**  
+   Built on PyTorch for massively parallel simulation.
+5. **Rich controller suite out-of-the-box**  
+   - Geometric Tracking Controller
+   - Linear Quadratic Regulator (LQR)
+   - H∞ Robust Controller
+   - Nonlinear Model Predictive Control (NMPC)
+   - Reinforcement Learning (PPO via Stable-Baselines3)
+6. **Trajectory planning and visualization**  
+   - YAML-configurable reference trajectories
+   - Real-time animated 3D visualization of quadrotor motion
 
 ## Installation
 
@@ -87,9 +91,9 @@ rotor-bench/
 │   ├── geometric_control.py # Geometric controller
 │   ├── hinf_syn.py          # H∞ control synthesizer
 │   ├── hinfty_control.py    # H∞ controller
-│   ├── lqr_control.py       # LQR controller
-│   ├── nmpc.py              # Nonlinear model predictive controller
-│   └── rl_control.py        # RL controller
+│   ├── lqr_control.py       # LQR Controller
+│   ├── nmpc.py              # Nonlinear MPC
+│   └── rl_control.py        # RL Controller
 ├── configs/                 # Vehicle and trajectory configs
 ├── viz/                     # 3D visualization
 ├── assets/                  # Images and media
@@ -99,6 +103,21 @@ rotor-bench/
 ## Preview
 
 ![](assets/preview.png)
+
+## Citation
+
+If you find **RotorBench** useful for your research, please consider citing:
+
+```bibtex
+@misc{rotorbench2026,
+  author = {Cheng, Sheng-Wen},
+  title  = {RotorBench: A Lightweight Python Quadrotor Simulator for Control Benchmarking},
+  year   = {2026},
+  url    = {https://github.com/shengwen-tw/rotor-bench}
+}
+```
+
+An extended version of this work is currently under preparation for submission to arXiv and a peer-reviewed journal.
 
 ## License
 
