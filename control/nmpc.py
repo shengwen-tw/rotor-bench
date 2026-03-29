@@ -11,7 +11,7 @@ class NMPC:
         self.psi_weights = np.array([1.0, 1.0, 1.0])
 
         # Step for state horizon
-        self.Np = 20
+        self.Np = 50
 
         # Dimension of the state
         self.x_dim = 18
@@ -21,23 +21,23 @@ class NMPC:
 
         # State error penalty weights
         self.Qy = np.zeros((9, 9))
-        self.Qy[0, 0] = 400.0  # px
-        self.Qy[1, 1] = 400.0  # py
-        self.Qy[2, 2] = 750.0  # pz
-        self.Qy[3, 3] = 100.0  # vx
-        self.Qy[4, 4] = 100.0  # vy
-        self.Qy[5, 5] = 200.0  # vz
-        self.Qy[6, 6] = 0.5   # Wx
-        self.Qy[7, 7] = 0.5   # Wy
-        self.Qy[8, 8] = 0.5   # Wz
+        self.Qy[0, 0] = 1500.0  # px
+        self.Qy[1, 1] = 1500.0  # py
+        self.Qy[2, 2] = 750.0   # pz
+        self.Qy[3, 3] = 200.0   # vx
+        self.Qy[4, 4] = 250.0   # vy
+        self.Qy[5, 5] = 250.0   # vz
+        self.Qy[6, 6] = 0.5     # Wx
+        self.Qy[7, 7] = 0.5     # Wy
+        self.Qy[8, 8] = 0.5     # Wz
         self.KR = 1.0
 
         # Control penalty weights
         self.Qu = np.zeros((4, 4))
         self.Qu[0, 0] = 0.002  # fc
-        self.Qu[1, 1] = 0.02  # Mx
-        self.Qu[2, 2] = 0.02  # My
-        self.Qu[3, 3] = 0.01  # Mz
+        self.Qu[1, 1] = 0.02   # Mx
+        self.Qu[2, 2] = 0.02   # My
+        self.Qu[3, 3] = 0.01   # Mz
 
         # Constraints for control imputs
         self.f_min = 0.0
