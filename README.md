@@ -58,8 +58,7 @@ python run.py --ctrl=NMPC
 Download a pre-trained policy:
 ```
 mkdir -p runs/ppo_quadrotor/best
-cd runs/ppo_quadrotor/best
-wget https://github.com/shengwen-tw/quadrotor-sim-py/raw/refs/heads/blob/runs/ppo_quadrotor/best/best_model.zip
+wget -O runs/ppo_quadrotor/best/best_model.zip https://raw.githubusercontent.com/shengwen-tw/rotor-bench/blob/runs/ppo_quadrotor/best/best_model.zip
 ```
 
 Start simulation with the RL controller:
