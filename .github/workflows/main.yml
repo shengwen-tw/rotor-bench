@@ -18,8 +18,14 @@ jobs:
         python-version: "3.11"
     - name: install dependencies
       run: pip install -r requirements.txt
+    - name: fetch RL model
+      run: |
+           mkdir -p runs/ppo_quadrotor/best
+           wget -O runs/ppo_quadrotor/best/best_model.zip https://raw.githubusercontent.com/shengwen-tw/rotor-bench/blob/runs/ppo_quadrotor/best/best_model.zip
     - name: run
       run: |
-           python ./main.py --ctrl=GEOMETRIC_CTRL --iterations=5 --plot=no --animate=no
-           python ./main.py --ctrl=LQR --iterations=5 --plot=no --animate=no
-           python ./main.py --ctrl=HINFTY_CTRL --iterations=5 --plot=no --animate=no
+           python ./run.py --ctrl=GEOMETRIC_CTRL --iterations=5 --plot=no --animate=no
+           python ./run.py --ctrl=LQR --iterations=5 --plot=no --animate=no
+           python ./run.py --ctrl=HINFTY_CTRL --iterations=5 --plot=no --animate=no
+           python ./run.py --ctrl=NMPC --iterations=5 --plot=no --animate=no
+           python ./run.py --ctrl=RL --iterations=5 --plot=no --animate=no
