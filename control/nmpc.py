@@ -53,6 +53,7 @@ class NMPC:
         # Reset data
         self.reset()
 
+
     def reset(self):
         self.idx = 0
         self.time_arr = np.zeros(self.iterations)

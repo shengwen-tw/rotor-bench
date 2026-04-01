@@ -7,7 +7,7 @@ from models.se3_math import NumpySE3
 from control.care_sda import care_sda
 
 
-class LQRController:
+class LQR:
     def __init__(self, args):
         self.iterations = args.iterations
         self.dt = args.dt

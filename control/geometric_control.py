@@ -46,7 +46,7 @@ class GeometricMomentController:
         return uav_ctrl_M
 
 
-class GeometricTrackingController:
+class GeometricControl:
     def __init__(self, args):
         self.iterations = args.iterations
         self.dt = args.dt

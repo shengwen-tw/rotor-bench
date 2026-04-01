@@ -5,9 +5,9 @@ from tqdm import trange
 from models.dynamics import Dynamics
 from models.quadrotor import QuadrotorEnv
 from models.se3_math import NumpySE3
-from control.geometric_control import GeometricTrackingController
-from control.hinfty_control import HinfController
-from control.lqr_control import LQRController
+from control.geometric_control import GeometricControl
+from control.hinfty_control import HinftyControl
+from control.lqr_control import LQR
 from control.nmpc import NMPC
 from control.rl_control import RLController
 
@@ -77,13 +77,13 @@ def main(args):
     # Initialize quadrotor controller
     controller = None
     if args.ctrl == 'GEOMETRIC_CTRL':
-        controller = GeometricTrackingController(args)
+        controller = GeometricControl(args)
     elif args.ctrl == 'NMPC':
         controller = NMPC(args)
     elif args.ctrl == 'LQR':
-        controller = LQRController(args)
+        controller = LQR(args)
     elif args.ctrl == 'HINFTY_CTRL':
-        controller = HinfController(args)
+        controller = HinftyControl(args)
     elif args.ctrl == 'RL':
         controller = RLController(args)
     else:

@@ -7,7 +7,7 @@ from models.se3_math import NumpySE3
 from control.hinf_syn import hinf_syn
 
 
-class HinfController:
+class HinftyControl:
     def __init__(self, args):
         self.iterations = args.iterations
         self.dt = args.dt
