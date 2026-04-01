@@ -32,25 +32,25 @@ pip install -r requirements.txt
 ### Geometric Tracking Controller
 
 ```bash
-python main.py --ctrl=GEOMETRIC_CTRL
+python run.py --ctrl=GEOMETRIC_CTRL
 ```
 
 ### Linear Quadratic Regulator (LQR)
 
 ```bash
-python main.py --ctrl=LQR
+python run.py --ctrl=LQR
 ```
 
 ### H∞ Controller
 
 ```bash
-python main.py --ctrl=HINFTY_CTRL
+python run.py --ctrl=HINFTY_CTRL
 ```
 
 ### Nonlinear Model Predictive Control (NMPC)
 
 ```bash
-python main.py --ctrl=NMPC
+python run.py --ctrl=NMPC
 ```
 
 ### Reinforcement Learning (Experimental)
@@ -64,7 +64,7 @@ wget https://github.com/shengwen-tw/quadrotor-sim-py/raw/refs/heads/blob/runs/pp
 
 Start simulation with the RL controller:
 ```
-python main.py --ctrl=RL
+python run.py --ctrl=RL
 ```
 
 To train an RL policy:
@@ -77,7 +77,7 @@ tensorboard --logdir runs/ppo_quadrotor
 
 ```
 rotor-bench/
-├── main.py                  # Entry point of the simulation
+├── run.py                   # Entry point of the simulation
 ├── train_rl.py              # RL training script
 ├── trajectory_planner.py    # Trajectory planner
 ├── models/
