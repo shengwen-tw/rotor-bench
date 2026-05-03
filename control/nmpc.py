@@ -8,8 +8,6 @@ class NMPC:
         self.iterations = args.iterations
         self.dt = args.dt
 
-        self.psi_weights = np.array([1.0, 1.0, 1.0])
-
         # Step for state horizon
         self.Np = 50
 
@@ -19,18 +17,23 @@ class NMPC:
         # Dimension of the control input
         self.u_dim = 4
 
+        # Dimension of the tracking error xi = [ex, ev, eR, eW]
+        self.xi_dim = 12
+
         # State error penalty weights
-        self.Qy = np.zeros((9, 9))
+        self.Qy = np.zeros((self.xi_dim, self.xi_dim))
         self.Qy[0, 0] = 1500.0  # px
         self.Qy[1, 1] = 1500.0  # py
         self.Qy[2, 2] = 750.0   # pz
         self.Qy[3, 3] = 200.0   # vx
         self.Qy[4, 4] = 250.0   # vy
         self.Qy[5, 5] = 250.0   # vz
-        self.Qy[6, 6] = 0.5     # Wx
-        self.Qy[7, 7] = 0.5     # Wy
-        self.Qy[8, 8] = 0.5     # Wz
-        self.KR = 1.0
+        self.Qy[6, 6] = 1.0     # eRx
+        self.Qy[7, 7] = 1.0     # eRy
+        self.Qy[8, 8] = 1.0     # eRz
+        self.Qy[9, 9] = 0.5     # Wx
+        self.Qy[10, 10] = 0.5   # Wy
+        self.Qy[11, 11] = 0.5   # Wz
 
         # Control penalty weights
         self.Qu = np.zeros((4, 4))
@@ -89,15 +92,19 @@ class NMPC:
         W = state[15:18]
         return x, v, R, W
 
-    def rotational_cost(self, R, Rd):
-        psi = 0
-        for axis in range(3):
-            psi += self.psi_weights[axis] * \
-                (1.0 - ca.dot(R[:, axis], Rd[:, axis]))
-        return psi
+    def vee_map(self, M):
+        return ca.vertcat(M[2, 1], M[0, 2], M[1, 0])
 
-    def observation(self, state):
-        return ca.vertcat(state[0:3], state[3:6], state[15:18])
+    def attitude_error(self, R, Rd):
+        e_R_mat = (ca.mtimes(Rd.T, R) - ca.mtimes(R.T, Rd))
+        return 0.5 * self.vee_map(e_R_mat)
+
+    def tracking_error(self, state, tracking_ref, attitude_ref):
+        ex = state[0:3] - tracking_ref[0:3]
+        ev = state[3:6] - tracking_ref[3:6]
+        eR = self.attitude_error(ca.reshape(state[6:15], 3, 3), attitude_ref)
+        eW = state[15:18] - tracking_ref[6:9]
+        return ca.vertcat(ex, ev, eR, eW)
 
     def dynamics_update(self, state, control, mass, J, g):
         x = state[0:3]
@@ -122,47 +129,43 @@ class NMPC:
         return ca.vertcat(x_next, v_next, ca.reshape(R_next, 9, 1), W_next)
 
     def build_reference_horizon(self, env):
-        y_ref = []
-        R_ref = []
+        tracking_ref = []
+        attitude_ref = []
         base_idx = env.idx
 
         for k in range(self.Np):
             ref_idx = min(base_idx + k, env.xd.shape[1] - 1)
             xd = env.xd[:, ref_idx]
             vd = env.vd[:, ref_idx]
-            y_ref.append(np.concatenate([xd, vd, np.zeros(3)]))
-            R_ref.append(np.eye(3).reshape(-1, order='F'))
+            tracking_ref.append(np.concatenate([xd, vd, np.zeros(3)]))
+            attitude_ref.append(np.eye(3).reshape(-1, order='F'))
 
-        return np.concatenate(y_ref), np.concatenate(R_ref)
+        return np.concatenate(tracking_ref), np.concatenate(attitude_ref)
 
     def build_solver(self):
         X = ca.SX.sym('X', self.x_dim, self.Np + 1)
         U = ca.SX.sym('U', self.u_dim, self.Np)
 
         x0_param = ca.SX.sym('x0', self.x_dim)
-        y_ref_param = ca.SX.sym('y_ref', 9 * self.Np)
-        R_ref_param = ca.SX.sym('R_ref', 9 * self.Np)
+        tracking_ref_param = ca.SX.sym('tracking_ref', 9 * self.Np)
+        attitude_ref_param = ca.SX.sym('attitude_ref', 9 * self.Np)
         mass_param = ca.SX.sym('mass')
         g_param = ca.SX.sym('g')
         J_param = ca.SX.sym('J', 3, 3)
 
-        params = ca.vertcat(x0_param, y_ref_param, R_ref_param, mass_param,
+        params = ca.vertcat(x0_param, tracking_ref_param, attitude_ref_param, mass_param,
                             g_param, ca.reshape(J_param, 9, 1),)
 
         obj = 0
         g = [X[:, 0] - x0_param]
 
         for k in range(self.Np):
-            yk = self.observation(X[:, k])
-            y_ref_k = y_ref_param[9 * k:9 * (k + 1)]
-            Rk = ca.reshape(X[6:15, k], 3, 3)
-            Rd_k = ca.reshape(R_ref_param[9 * k:9 * (k + 1)], 3, 3)
+            tracking_ref_k = tracking_ref_param[9*k : 9*(k+1)]
+            attitude_ref_k = ca.reshape(attitude_ref_param[9*k : 9*(k+1)], 3, 3)
             uk = U[:, k]
 
-            ey = yk - y_ref_k
-            psi = self.rotational_cost(Rk, Rd_k)
-            obj += ca.mtimes([ey.T, self.Qy, ey])
-            obj += self.KR * psi * psi
+            xi = self.tracking_error(X[:, k], tracking_ref_k, attitude_ref_k)
+            obj += ca.mtimes([xi.T, self.Qy, xi])
             obj += ca.mtimes([uk.T, self.Qu, uk])
 
             x_next = self.dynamics_update(
@@ -208,8 +211,8 @@ class NMPC:
             U_guess.reshape(-1, order='F'),
         ])
 
-    def solve_nmpc(self, x0, y_ref, R_ref, mass, J, g):
-        params = np.concatenate([x0, y_ref, R_ref, np.array([mass, g]),
+    def solve_nmpc(self, x0, tracking_ref, attitude_ref, mass, J, g):
+        params = np.concatenate([x0, tracking_ref, attitude_ref, np.array([mass, g]),
                                 J.reshape(-1, order='F')])
 
         init_guess = self.build_initial_guess(x0, mass, g)
@@ -235,14 +238,15 @@ class NMPC:
 
         # Solve nonlinear model predictive control problem
         x0 = self.pack_state(x, v, R, W)
-        y_ref, R_ref = self.build_reference_horizon(env)
-        X_opt, U_opt, total_cost = self.solve_nmpc(x0, y_ref, R_ref, mass, J, g)
+        tracking_ref, attitude_ref = self.build_reference_horizon(env)
+        X_opt, U_opt, total_cost = self.solve_nmpc(
+            x0, tracking_ref, attitude_ref, mass, J, g)
         u = U_opt[:, 0]
 
         if record:
             # Record data for plotting
-            ex = x - y_ref[0:3]
-            ev = v - y_ref[3:6]
+            ex = x - tracking_ref[0:3]
+            ev = v - tracking_ref[3:6]
             eW = W
             self.time_arr[self.idx] = self.idx * self.dt
             self.cost_arr[self.idx] = total_cost
