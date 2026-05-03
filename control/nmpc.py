@@ -99,11 +99,17 @@ class NMPC:
         e_R_mat = (ca.mtimes(Rd.T, R) - ca.mtimes(R.T, Rd))
         return 0.5 * self.vee_map(e_R_mat)
 
+    def angular_velocity_error(self, W, R, Rd, Wd):
+        return W - ca.mtimes(R.T, ca.mtimes(Rd, Wd))
+
     def tracking_error(self, state, tracking_ref, attitude_ref):
         ex = state[0:3] - tracking_ref[0:3]
         ev = state[3:6] - tracking_ref[3:6]
-        eR = self.attitude_error(ca.reshape(state[6:15], 3, 3), attitude_ref)
-        eW = state[15:18] - tracking_ref[6:9]
+        R = ca.reshape(state[6:15], 3, 3)
+        W = state[15:18]
+        Wd = tracking_ref[6:9]
+        eR = self.attitude_error(R, attitude_ref)
+        eW = self.angular_velocity_error(W, R, attitude_ref, Wd)
         return ca.vertcat(ex, ev, eR, eW)
 
     def dynamics_update(self, state, control, mass, J, g):
@@ -120,11 +126,13 @@ class NMPC:
         v_dot = g * e3 - (fc / mass) * ca.mtimes(R, e3)
         v_next = v + v_dot * self.dt
 
-        J_inv = ca.inv(J)
-        W_dot = ca.mtimes(J_inv, -ca.cross(W, ca.mtimes(J, W)) + M)
+        W_rhs = -ca.cross(W, ca.mtimes(J, W)) + M
+        W_dot = ca.solve(J, W_rhs)
         W_half = W + 0.5 * self.dt * W_dot
         R_next = ca.mtimes(R, self.cayley_transform(W_half * self.dt))
-        W_next = W_half + 0.5 * self.dt * W_dot
+        W_half_rhs = -ca.cross(W_half, ca.mtimes(J, W_half)) + M
+        W_dot_half = ca.solve(J, W_half_rhs)
+        W_next = W_half + 0.5 * self.dt * W_dot_half
 
         return ca.vertcat(x_next, v_next, ca.reshape(R_next, 9, 1), W_next)
 
@@ -247,7 +255,9 @@ class NMPC:
             # Record data for plotting
             ex = x - tracking_ref[0:3]
             ev = v - tracking_ref[3:6]
-            eW = W
+            Rd = attitude_ref[0:9].reshape((3, 3), order='F')
+            Wd = tracking_ref[6:9]
+            eW = W - R.T @ Rd @ Wd
             self.time_arr[self.idx] = self.idx * self.dt
             self.cost_arr[self.idx] = total_cost
             self.eW_arr[:, self.idx] = eW
