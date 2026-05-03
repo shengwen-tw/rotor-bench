@@ -27,7 +27,7 @@ A lightweight Python-based quadrotor flight simulator for benchmarking, rapid pr
 pip install -r requirements.txt
 ```
 
-## Usage
+## Run Simulations
 
 ### Geometric Tracking Controller
 
@@ -72,10 +72,35 @@ python train_rl.py --traj HOVERING --iterations 1000 --n-envs 64 --total-steps 1
 tensorboard --logdir runs/ppo_quadrotor
 ```
 
+## Benchmarking (Experimental)
+
+Run multiple independent simulations in parallel for benchmarking. It currently serves as stress testing.
+
+```shell
+python benchmark.py [--ctrl CONTROLLER] [--workers NUMBER]
+```
+
+Common options:
+
+- `--ctrl {GEOMETRIC_CTRL,NMPC,LQR,HINFTY_CTRL,RL}`: controller to benchmark
+- `--workers N`: number of worker processes to launch
+- `--traj {HOVERING,CIRCLE,EIGHT}`: reference trajectory
+- `--iterations N`: simulation steps per run
+- `--dt DT`: simulation timestep
+
+Example:
+
+```shell
+python benchmark.py --ctrl NMPC --workers 16
+```
+
+The benchmark computes statistics such as wall time, completed steps, and position/velocity tracking error.
+
 ## Project Structure
 
 ```
 rotor-bench/
+├── benchmark.py             # Parallel benchmarking script
 ├── run.py                   # Entry point of the simulation
 ├── train_rl.py              # RL training script
 ├── trajectory_planner.py    # Trajectory planner
