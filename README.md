@@ -143,6 +143,19 @@ If you find **RotorBench** useful for your research, please consider citing:
 
 An extended version of this work is currently under preparation for submission to arXiv and a peer-reviewed journal.
 
+For the H∞ control, please cite:
+
+```bibtex
+@inproceedings{cheng2022robust,
+  title={Robust State-Feedback H∞ Control of Quadrotor},
+  author={Cheng, Sheng-Wen and Hung, Hsin-Ai},
+  booktitle={2022 International Automatic Control Conference (CACS)},
+  pages={1--7},
+  year={2022},
+  organization={IEEE}
+}
+```
+
 ## License
 
 This project is licensed under the **MIT License**.  
