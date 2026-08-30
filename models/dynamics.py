@@ -31,6 +31,7 @@ class DynamicsBatch:
         self.g = 9.8                             # Gravity [m/s^2]
         self.J = J.clone().contiguous()          # Inertia matrix
         self.J_inv = torch.linalg.inv(self.J)    # Inverse inertia matrix
+        self.J_d = self._nonstandard_inertia(self.J)
         self.x = ref.new_zeros((self.B, 3))      # Position [m]
         self.v = ref.new_zeros((self.B, 3))      # Velocity [m/s]
         self.a = ref.new_zeros((self.B, 3))      # Acceleration [m/s^2]
@@ -52,6 +53,7 @@ class DynamicsBatch:
     def set_inertia_matrix(self, J: Tensor):
         self.J = J.clone().contiguous()
         self.J_inv = torch.linalg.inv(self.J)
+        self.J_d = self._nonstandard_inertia(self.J)
 
     def set_position(self, x: Tensor):
         self.x = x.clone().contiguous()
@@ -119,6 +121,62 @@ class DynamicsBatch:
     #=========#
     # Helpers #
     #=========#
+    def _nonstandard_inertia(self, J: Tensor) -> Tensor:
+        """Return the nonstandard inertia used by the discrete Lagrangian."""
+        trace = torch.diagonal(J, dim1=-2, dim2=-1).sum(dim=-1)
+        return 0.5 * trace[:, None, None] * self.I - J
+
+    def _so3_exp(self, rotation_vector: Tensor) -> Tensor:
+        """Batched SO(3) exponential map evaluated with Rodrigues' formula."""
+        theta_squared = (rotation_vector * rotation_vector).sum(
+            dim=1, keepdim=True)
+        eps = torch.finfo(rotation_vector.dtype).eps
+        theta = torch.sqrt(theta_squared.clamp_min(eps))
+
+        # The Taylor branches keep the map well conditioned near the origin.
+        sinc = torch.where(
+            theta_squared < 1e-6,
+            1.0 - theta_squared / 6.0 + theta_squared * theta_squared / 120.0,
+            torch.sin(theta) / theta.clamp_min(eps),
+        )
+        cosc = torch.where(
+            theta_squared < 1e-6,
+            0.5 - theta_squared / 24.0
+            + theta_squared * theta_squared / 720.0,
+            (1.0 - torch.cos(theta)) / theta_squared.clamp_min(eps),
+        )
+
+        rotation_hat = TensorSE3.hat_map_3x3(rotation_vector)
+        return (self.I + sinc[:, :, None] * rotation_hat
+                + cosc[:, :, None] * (rotation_hat @ rotation_hat))
+
+    def _solve_relative_rotation(self, angular_momentum: Tensor) -> Tensor:
+        """Solve the implicit LGVI discrete Legendre transform for ``F``.
+
+        The relative attitude ``F`` is the solution in SO(3) of
+
+            F J_d - J_d F^T = h hat(angular_momentum).
+
+        A Lie-group Newton iteration is used, so every iterate remains on
+        SO(3).  A fixed iteration count avoids device synchronizations for
+        batched GPU simulations.
+        """
+        omega = (self.J_inv @ angular_momentum[:, :, None])[:, :, 0]
+        F = self._so3_exp(self.dt * omega)
+        target = self.dt * angular_momentum
+
+        for _ in range(3):
+            FJ_d = F @ self.J_d
+            residual = TensorSE3.vee_map_3x3(
+                FJ_d - FJ_d.transpose(1, 2)) - target
+            trace = torch.diagonal(FJ_d, dim1=1, dim2=2).sum(dim=1)
+            jacobian = trace[:, None, None] * self.I - FJ_d
+            delta = torch.linalg.solve(
+                jacobian, -residual[:, :, None])[:, :, 0]
+            F = self._so3_exp(delta) @ F
+
+        return F
+
     def dv_dt(self, f: Tensor) -> Tensor:
         return (self.mass * self.g * self.e3 - f) / self.mass
 
@@ -131,14 +189,6 @@ class DynamicsBatch:
         Wdot = (self.J_inv @ (self.M - W_cross_JW)[:, :, None])[:, :, 0]
         return Wdot
 
-    def integrator_rk4(self, f_now: Tensor, f_dot_func) -> Tensor:
-        """Runge–Kutta fourth-order method"""
-        k1 = f_dot_func(f_now)
-        k2 = f_dot_func(f_now + 0.5 * self.dt * k1)
-        k3 = f_dot_func(f_now + 0.5 * self.dt * k2)
-        k4 = f_dot_func(f_now + self.dt * k3)
-        return f_now + (self.dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-
     #=================#
     # Dynamics update #
     #=================#
@@ -146,42 +196,32 @@ class DynamicsBatch:
         """
         Update rigid body dynamics for one time step.
 
-        Integration strategy:
-        - Linear velocity (v): integrated using Euler method; since
-          acceleration is constant within a time step, higher-order methods
-          would reduce to Euler.
-        - Position (x): integrated using constant-acceleration kinematics
-          (x += v * dt + 0.5 * a * dt^2).
-        - Angular velocity (W): integrated using RK4 due to nonlinear dynamics
-          involving cross products.
-        - Rotation matrix (R): updated directly on SO(3) with the Cayley transform,
-          which preserves the orthogonality and structure of the SO(3) group.
+        A forced Lie group variational integrator advances the complete SE(3)
+        state.  Force (in the inertial frame) and moment (in the body frame)
+        are held constant over the step.  The rotational increment is obtained
+        from the implicit discrete Euler equation and therefore lies on SO(3)
+        without a projection or attitude coordinates.
         """
-
-        # 1. Update linear acceleration from force
+        W = self.W
         self.a = self.dv_dt(self.f)
+        self.W_dot = self.dW_dt(W)
 
-        # 2. Update angular acceleration from moment
-        self.W_dot = self.dW_dt(self.W)
-
-        # 3. Update position with constant-acceleration kinematics
+        # Translational discrete Euler-Lagrange equations.  With a held force
+        # these reduce to the exact constant-acceleration update.
         self.x = self.x + self.v * self.dt + 0.5 * self.a * (self.dt ** 2)
-
-        # 4. Update linear velocity (Euler)
         self.v = self.v + self.a * self.dt
 
-        # 5. Update angular velocity
-        self.W = self.integrator_rk4(self.W, self.dW_dt)
+        # Forced rotational discrete Euler-Lagrange equations.  The same body
+        # moment is used at both endpoints under the zero-order-hold assumption.
+        momentum = (self.J @ W[:, :, None])[:, :, 0]
+        momentum_half = momentum + 0.5 * self.dt * self.M
+        F = self._solve_relative_rotation(momentum_half)
+        momentum_next = (
+            F.transpose(1, 2) @ momentum_half[:, :, None]
+        )[:, :, 0] + 0.5 * self.dt * self.M
 
-        # 6. Update rotation matrix directly on SO(3) with the Cayley transform
-        # R = R @ inv(I - A) @ (I + A), where A = hat(Omega * dt / 2)
-        A = TensorSE3.hat_map_3x3(self.W * self.dt * 0.5)
-        I_minus_A = self.I - A
-        I_plus_A  = self.I + A
-        # Solve a linear system instead of a matrix inversion for better accuracy
-        dR = torch.linalg.solve(I_minus_A, I_plus_A)
-        self.R = self.R @ dR
-        self.R = TensorSE3.rotmat_orthonormalize(self.R)
+        self.R = self.R @ F
+        self.W = (self.J_inv @ momentum_next[:, :, None])[:, :, 0]
 
 
 class Dynamics:
